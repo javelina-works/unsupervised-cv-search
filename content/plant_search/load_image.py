@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-import rasterio
+# import rasterio
 import cv2
 import os
 
@@ -8,11 +8,11 @@ def load_image(file_path):
     try:
         if not os.path.exists(file_path):
             print(f"File not found: {file_path}")
-        if file_path.endswith('.tif'):
-            # Use rasterio for GeoTIFFs
-            with rasterio.open(file_path) as src:
-                image = src.read([b for b in range(1, src.count + 1)]).transpose(1, 2, 0)  # RGB(A)
-                return image
+        # if file_path.endswith('.tif'):
+        #     # Use rasterio for GeoTIFFs
+        #     with rasterio.open(file_path) as src:
+        #         image = src.read([b for b in range(1, src.count + 1)]).transpose(1, 2, 0)  # RGB(A)
+        #         return image
         else:
             # Use OpenCV or PIL for standard formats
             return cv2.cvtColor(cv2.imread(file_path), cv2.COLOR_BGR2RGB)
