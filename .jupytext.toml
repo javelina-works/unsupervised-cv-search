@@ -1,0 +1,2 @@
+formats = "ipynb,jupytext//py,jupytext//md"
+notebook_metadata_filter = "all"
