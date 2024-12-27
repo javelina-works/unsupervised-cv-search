@@ -1,0 +1,6 @@
+
+
+# 7_large_datasets
+# ================
+# Ignore generated tiles (will be several GB for large inputs)
+7_large_datasets/tiling/*
