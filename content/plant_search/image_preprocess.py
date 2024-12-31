@@ -5,7 +5,8 @@ from skimage.filters import threshold_otsu
 from skimage.measure import label, regionprops
 import cv2
 import numpy as np
-
+import geopandas as gpd
+from shapely.geometry import Point, Polygon
 
 
 def generate_target_mask(image):
@@ -41,7 +42,7 @@ def generate_target_mask(image):
     return binary_mask
 
 
-def identify_targets(binary_mask):
+def identify_targets(binary_mask, transform, region_crs="EPSG:32613"):
     # Step 1: Preprocess the binary mask
     selem = disk(3)  # Structuring element
     cleaned_mask = closing(binary_mask, selem)  # Fill small gaps
@@ -51,16 +52,30 @@ def identify_targets(binary_mask):
     regions = regionprops(labeled_mask)
 
     # Step 3: Extract centroids and bounding boxes
-    centroids = []
-    bounding_boxes = []
+    features = []
 
     for region in regions:
-        # Centroid
-        centroid = region.centroid  # (row, col)
-        centroids.append((round(centroid[1], 2), round(centroid[0], 2)))  # Format x, y to 2 decimal places
+        # Centroid (convert pixel coordinates to geographic coordinates)
+        centroid_row, centroid_col = region.centroid  # (row, col in pixel space)
+        centroid_x, centroid_y = transform * (centroid_col, centroid_row)  # Apply affine transform
+        centroid_point = Point(centroid_x, centroid_y)  # Geographic centroid as Point
 
         # Bounding box
         min_row, min_col, max_row, max_col = region.bbox
-        bounding_boxes.append(((min_col, min_row), (max_col, max_row)))
+        min_x, min_y = transform * (min_col, min_row)  # Top-left corner
+        max_x, max_y = transform * (max_col, max_row)  # Bottom-right corner
+        bounding_box = Polygon([
+            (min_x, min_y),
+            (max_x, min_y),
+            (max_x, max_y),
+            (min_x, max_y),
+            (min_x, min_y)  # Close the polygon
+        ])
 
-    return centroids, bounding_boxes
+        # Add to feature list
+        features.append({"geometry": centroid_point, "bounding_box": bounding_box})
+
+    # Step 4: Create GeoDataFrame
+    gdf = gpd.GeoDataFrame(features, crs=region_crs)
+
+    return gdf

@@ -89,7 +89,8 @@ def generate_voronoi_partition(region_polygon, num_points=1):
 
 
 
-def centroidal_voronoi_tessellation(region_polygon, num_points, max_iterations=10, tolerance=1e-3):
+def centroidal_voronoi_tessellation(region_polygon, num_points,
+                                    max_iterations=10, tolerance=1e-3, region_crs="EPSG:32613"):
     """
     Perform Centroidal Voronoi Tessellation (CVT) to refine seed points for uniform partitions.
     
@@ -136,9 +137,9 @@ def centroidal_voronoi_tessellation(region_polygon, num_points, max_iterations=1
 
     # Create Voronoi polygons GeoDataFrame
     clipped_polygons = [poly.intersection(region_polygon) for poly in voronoi_result.geoms]
-    voronoi_gdf = gpd.GeoDataFrame({"geometry": clipped_polygons}, crs="EPSG:32614")
+    voronoi_gdf = gpd.GeoDataFrame({"geometry": clipped_polygons}, crs=region_crs)
     voronoi_gdf['id'] = range(len(voronoi_gdf)) # Add an 'id' column to the Voronoi GeoDataFrame
 
-    points_gdf = gpd.GeoDataFrame({"geometry": points}, crs="EPSG:32614")
+    points_gdf = gpd.GeoDataFrame({"geometry": points}, crs=region_crs)
 
     return voronoi_gdf, points_gdf
