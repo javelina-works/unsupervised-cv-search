@@ -41,6 +41,29 @@ def generate_target_mask(image):
 
     return binary_mask
 
+def correct_binary_mask(binary_mask, original_shape):
+    """
+    Correct the binary mask by upscaling it to match the original image's resolution.
+
+    Parameters:
+    - binary_mask: ndarray
+        The downsampled binary mask.
+    - original_shape: tuple
+        The shape of the original image (height, width).
+
+    Returns:
+    - corrected_mask: ndarray
+        The binary mask scaled back to the original resolution.
+    """
+    # Upscale the binary mask to match the original dimensions
+    upscaled_mask = cv2.resize(binary_mask.astype(np.uint8), 
+                               (original_shape[1], original_shape[0]),  # width, height
+                               interpolation=cv2.INTER_NEAREST)
+
+    # Threshold to ensure binary values (0 or 1)
+    corrected_mask = (upscaled_mask > 0).astype(np.uint8)
+
+    return corrected_mask
 
 def identify_targets(binary_mask, transform, region_crs="EPSG:32613"):
     # Step 1: Preprocess the binary mask
