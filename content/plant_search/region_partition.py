@@ -101,8 +101,7 @@ def centroidal_voronoi_tessellation(region_polygon, num_points,
         tolerance (float): Convergence threshold for point adjustments.
     
     Returns:
-        GeoDataFrame: Voronoi polygons as GeoDataFrame.
-        GeoDataFrame: Refined points as shapely.geometry.Point objects.
+        GeoDataFrame: Voronoi polygons, centroids as GeoDataFrame.
     """
     # Step 1: Generate initial random points
     minx, miny, maxx, maxy = region_polygon.bounds
@@ -137,9 +136,8 @@ def centroidal_voronoi_tessellation(region_polygon, num_points,
 
     # Create Voronoi polygons GeoDataFrame
     clipped_polygons = [poly.intersection(region_polygon) for poly in voronoi_result.geoms]
-    voronoi_gdf = gpd.GeoDataFrame({"geometry": clipped_polygons}, crs=region_crs)
-    voronoi_gdf['id'] = range(len(voronoi_gdf)) # Add an 'id' column to the Voronoi GeoDataFrame
+    voronoi_cells_gdf = gpd.GeoDataFrame({"geometry": clipped_polygons}, crs=region_crs)
+    voronoi_cells_gdf['cell_centroid'] = points # Add centroids as column
+    voronoi_cells_gdf['cell_id'] = range(len(voronoi_cells_gdf)) # Add an 'id' column to the Voronoi cells GeoDataFrame
 
-    points_gdf = gpd.GeoDataFrame({"geometry": points}, crs=region_crs)
-
-    return voronoi_gdf, points_gdf
+    return voronoi_cells_gdf

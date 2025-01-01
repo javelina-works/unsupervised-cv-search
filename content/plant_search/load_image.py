@@ -13,14 +13,14 @@ def load_image(file_path):
             with rasterio.open(file_path) as src:
                 print(f"Image CRS - {src.crs}")
                 image = src.read([b for b in range(1, src.count + 1)]).transpose(1, 2, 0) # RGB(A)
-                return image, src.transform, src.bounds
+                return image, src.transform, src.bounds, src.crs
         else:
             # Use OpenCV or PIL for standard formats
             image = cv2.cvtColor(cv2.imread(file_path), cv2.COLOR_BGR2RGB)
-            return image, None, None
+            return image, None, None, None
     except Exception as e:
         print(f"Error loading image: {e}")
-        return None, None, None
+        return None, None, None, None
 
 # Visualize the image
 def plot_image(image, title="Image"):
