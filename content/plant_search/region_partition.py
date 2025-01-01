@@ -137,7 +137,7 @@ def centroidal_voronoi_tessellation(region_polygon, num_points,
     # Create Voronoi polygons GeoDataFrame
     clipped_polygons = [poly.intersection(region_polygon) for poly in voronoi_result.geoms]
     voronoi_cells_gdf = gpd.GeoDataFrame({"geometry": clipped_polygons}, crs=region_crs)
-    voronoi_cells_gdf['cell_centroid'] = points # Add centroids as column
+    voronoi_cells_gdf['cell_centroid'] = gpd.GeoSeries(points) # Add centroids as column
     voronoi_cells_gdf['cell_id'] = range(len(voronoi_cells_gdf)) # Add an 'id' column to the Voronoi cells GeoDataFrame
 
     return voronoi_cells_gdf

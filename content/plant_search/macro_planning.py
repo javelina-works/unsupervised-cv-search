@@ -45,13 +45,13 @@ def calculate_cell_workloads(cells_gdf, targets_gdf):
 
 
     # 1. Associate targets with cells
-    joined_gdf = gpd.sjoin(targets_gdf, cell_gdf, how="left", predicate="within")
+    joined_gdf = gpd.sjoin(targets_gdf, cells_gdf, how="left", predicate="within")
     targets_gdf["parent_cell_id"] = joined_gdf["index_right"]  # Assign cell_id based on spatial join
 
     # 2. Determine total work in each cell
     # joined = gpd.sjoin(cells_gdf, targets_gdf, how="left", predicate="contains")
     # joined_gdf = gpd.sjoin(cells_gdf, targets_gdf, how="inner", predicate="intersects") #  Spatial join: count targets within each cell
-    counts = joined_gdf.groupby(joined_gdf['parent_cell_id']).size()  # Count centroids in each cell
+    counts = joined_gdf.groupby(targets_gdf['parent_cell_id']).size()  # Count centroids in each cell
     cells_gdf["target_count"] = counts  # Add counts to cells GeoDataFrame
     cells_gdf["target_count"] = cells_gdf["target_count"].fillna(0).astype(int)  # Fill NaN with 0
 
@@ -70,7 +70,7 @@ def calculate_cell_workloads(cells_gdf, targets_gdf):
 
         workloads.append(workload)
 
-    cells_gdf["workload"] = workloads # Add workload as a new column in cells_gdf
+    cells_gdf["intra_workload"] = workloads # Add workload as a new column in cells_gdf
 
     return joined_gdf
 
