@@ -106,11 +106,13 @@ def create_distance_matrix(cell_gdf, base_station_gdf):
     integer_distance_matrix = np.ceil(distance_matrix).astype(int) # OR-tools doesn't work with np.float64
     return integer_distance_matrix
 
+import math
 
 def print_vrp_solution(data, manager, routing, solution):
     """Prints solution on console."""
     print(f"Objective: {solution.ObjectiveValue()}")
     max_route_distance = 0
+    min_route_distance = math.inf
     for vehicle_id in range(data["num_vehicles"]):
         index = routing.Start(vehicle_id)
         plan_output = f"Route for vehicle {vehicle_id}:\n"
@@ -126,7 +128,9 @@ def print_vrp_solution(data, manager, routing, solution):
         plan_output += f"Distance of the route: {route_distance}m\n"
         print(plan_output)
         max_route_distance = max(route_distance, max_route_distance)
+        min_route_distance = min(route_distance, min_route_distance) if route_distance>0 else min_route_distance
     print(f"Maximum of the route distances: {max_route_distance}m")
+    print(f"Minimum of the route distances: {min_route_distance}m")
 
 
 def solve_basic_vrp(data, print_routes=False):
