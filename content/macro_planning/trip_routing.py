@@ -39,6 +39,7 @@ def create_distance_matrix(cell_gdf, base_station_gdf, workload_compensated=Fals
 # Routing Solvers
 # ================
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+
 # from visualize_routing import print_vehicle_details
 from macro_planning.visualize_routing import print_vehicle_details
 
@@ -141,3 +142,4 @@ def solve_basic_vrp(data, print_routes=False):
     else:
         print("No solution found.")
         return None
+    
