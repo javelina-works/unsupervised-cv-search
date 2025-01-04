@@ -191,7 +191,7 @@ def distance_matrix_plot_distances(cell_gdf, distance_matrix, region_polygon, ba
         ax.plot(*line.xy, color='gray', linestyle='--', linewidth=1, alpha=0.35)
         
         # Annotate the distance on the line
-        midpoint = line.interpolate(0.5, normalized=True)
+        midpoint = line.interpolate(0.95, normalized=True)
         distance = distance_matrix[base_station_index, i]
         ax.text(midpoint.x, midpoint.y, f"{distance:.1f}", fontsize=8, color='red', alpha=0.8)
 

@@ -1,7 +1,7 @@
 import numpy as np
 import math
 
-def create_distance_matrix(cell_gdf, base_station_gdf):
+def create_distance_matrix(cell_gdf, base_station_gdf, workload_compensated=False):
     num_cells = len(cell_gdf)
 
     # Create a distance matrix (excluding intra-workload cost)
@@ -15,17 +15,21 @@ def create_distance_matrix(cell_gdf, base_station_gdf):
         for j, row_j in enumerate(cell_gdf.itertuples()):
             if i == j:
                 continue # zero for self
+
             dist = row_i.cell_centroid.distance(row_j.cell_centroid)
-            # distance_matrix[i][j] = dist + row_j.intra_workload
+            if workload_compensated:
+                dist += row_j.intra_workload
             distance_matrix[i][j] = dist
 
     # Add depot distances
     for i, row in enumerate(cell_gdf.itertuples()):
         dist_to_depot = depot_geometry.distance(row.cell_centroid)
+        if workload_compensated:
+            dist_to_depot += row.intra_workload
+
         distance_matrix[i, depot_index] = dist_to_depot  # To depot
         distance_matrix[depot_index, i] = dist_to_depot  # From depot
 
-    
     distance_matrix[depot_index, depot_index] = 0 # Depot has no self-distance
 
     integer_distance_matrix = np.ceil(distance_matrix).astype(int) # OR-tools doesn't work with np.float64
