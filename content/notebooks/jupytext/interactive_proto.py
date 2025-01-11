@@ -433,7 +433,7 @@ def depot_selection_layers(depot_data, cell_data):
     return depot_layers
 
 # +
-from ipyleaflet import Choropleth, GeoJSON, WidgetControl
+from ipyleaflet import Choropleth, GeoJSON, WidgetControl, FullScreenControl, GeomanDrawControl
 from ipywidgets import Select, Dropdown
 import matplotlib as plt
 from shapely.geometry import mapping, shape
@@ -518,6 +518,12 @@ m3.add(depot_select_control)
 depot_layer = all_depot_layers[depot_select.value] # Whichever is initially set
 m3.add(depot_layer)
 
+# draw_control = GeomanDrawControl()
+# draw_control.circlemarker = {}
+# draw_control.rotate = False
+# m3.add(draw_control)
+
+m3.add(FullScreenControl(position='topleft'))
 m3.add_control(LayersControl(position='topright'))
 m3.add(ScaleControl(position='bottomleft'))
 m3
