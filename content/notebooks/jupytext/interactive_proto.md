@@ -67,7 +67,7 @@ from pathlib import Path
 sys.path.append(str(Path.cwd().parent))
 ```
 
-```python
+<!-- #raw vscode={"languageId": "raw"} -->
 from plant_search.load_image import load_image
 from plant_search.region_partition import extract_region_contour, simplify_polygon
 
@@ -93,7 +93,7 @@ loaded_gdf.to_crs(epsg=4326, inplace=True)
 loaded_gdf.to_file(region_contour_geojson, driver="GeoJSON")
 print(f"Written geoJSON CRS: {loaded_gdf.crs}")
 print(type(loaded_gdf))
-```
+<!-- #endraw -->
 
 ### Create Voronoi Partitioning, Solve for Depots
 
@@ -119,7 +119,7 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 
 ```python
 from plant_search.region_partition import centroidal_voronoi_tessellation
-from macro_planning.depot_placement import find_depots
+from macro_planning.depot_placement import find_depots, assign_cells_to_depot
 
 region_outline_gdf = gpd.read_file(region_contour_shapefile)
 simplified_polygon = region_outline_gdf.geometry.iloc[0]
@@ -130,8 +130,17 @@ num_cells = int(simplified_polygon.area / target_area_sqm) # How many cells to g
 cell_gdf = centroidal_voronoi_tessellation(simplified_polygon, num_cells, max_iterations)
 
 # Find depots to cover all cells
-depot_gdf = find_depots(depot_radius, cell_gdf, region_outline_gdf)
+grid_density = 4
+depots_gdf = find_depots(depot_radius, cell_gdf, region_outline_gdf, grid_density)
 
+# for depot_id, depot in depots_gdf.iterrows():
+#     print(f'{depot_id}: {depot["geometry"]}')
+
+cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf)
+
+
+# for depot_id, depot in updated_cell_gdf.iterrows():
+#     print(f'{depot_id}: {depot["closest_depot"]}')
 ```
 
 #### Write Data to Files
@@ -158,10 +167,12 @@ centroid_gdf.to_crs(visualization_crs, inplace=True)  # Reset the CRS explicitly
 centroid_gdf.to_file(voronoi_centroids_filename, driver="GeoJSON")
 
 # Write Depot locations to file
-depot_gdf.to_crs(visualization_crs, inplace=True)
-depot_gdf.to_file(depots_filename, driver="GeoJSON")
+depots_gdf.to_crs(visualization_crs, inplace=True)
+depots_gdf.to_file(depots_filename, driver="GeoJSON")
 
 ```
+
+#### Data Interaction with Leaflet
 
 ```python
 from ipyleaflet import Circle, CircleMarker, LayerGroup
@@ -180,8 +191,8 @@ def create_depot_layers(depot_data):
         range_circle = Circle(
             location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
             radius=depot_radius,  # Circle radius in meters
-            color='black', fill=True, fill_color='#3366cc',
-            fill_opacity=0.1, weight=1,
+            color='black', fill=False, fill_color='#3366cc',
+            fill_opacity=0.05, weight=1,
             tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
         )
         
@@ -230,9 +241,9 @@ with open(depots_filename, "r") as f:
     depot_data = json.load(f)
 
 # print(region_contour_data)
-# print(voronoi_data)
+print(voronoi_data)
 # print(centroid_data)
-print(depot_data)
+# print(depot_data)
 
 
 
@@ -263,35 +274,6 @@ centroid_layer = GeoJSON(
 centroid_layer.visible = False  # Set layer to hidden
 m.add_layer(centroid_layer)
 
-# depot_layer = GeoJSON(
-#     data=depot_data, 
-#     # style={'color': 'black', 'radius':30, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
-#     hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
-#     point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
-#     name=depot_data['name'])
-# m.add_layer(depot_layer)
-
-def depot_style_callback(feature):
-    return {
-        'radius': 200 if feature["properties"]["depot_radius"] else 20,
-        'fillColor': '#3366cc',
-        'color': 'blue',
-        'weight': 1.5,
-        'fillOpacity': 0.2
-    }
-
-# depot_layer = GeoJSON(
-#     data=depot_data,
-#     style_callback=depot_style_callback,
-#     highlight_function=lambda feature: {
-#             'weight': 3,
-#             'color': 'yellow',
-#             'fillOpacity': 0.7
-#         },
-#     point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
-#     name=depot_data['name'])
-# m.add_layer(depot_layer)
-
 # Plot depot circles
 depot_layers = create_depot_layers(depot_data)
 for depot_layer in depot_layers:
@@ -303,39 +285,213 @@ m.add(ScaleControl(position='bottomleft'))
 m # Display the map
 ```
 
+## Show Routes from each Depot
+
+- Show cells associated with each depot
+- Show routes to cover all cells from each depot
+
 ```python
-import numpy as np
-import geopandas as gpd
-from shapely.geometry import Point
-from pulp import LpProblem, LpVariable, lpSum, LpMinimize, PULP_CBC_CMD, HiGHS_CMD
-import matplotlib.pyplot as plt
+cell_group_gdfs = [x for _, x in cell_gdf.groupby('closest_depot')]
 
-from macro_planning.depot_placement import find_depots
+print(len(cell_group_gdfs))
+print(type(cell_group_gdfs[0]))
 
-depot_gdf = find_depots(depot_radius, cell_gdf, region_contour_gdf)
+# cell_gdf_dict = cell_gdf.groupby('closest_depot').apply().to_dict()
+dict_of_groups = {
+    key: group
+    for key, group in cell_gdf.groupby('closest_depot')
+}
+
+# print(dict_of_groups)
+
+key1 = list(dict_of_groups.keys())[0]
+print(len(dict_of_groups.keys()))
+print(dict_of_groups[key1])
+# print(type(dict_of_groups[key1][0]))
+```
+
+```python
+from ipyleaflet import Choropleth, GeoJSON
+import matplotlib as plt
+
+colors = plt.cm.tab20(range(len(depots_gdf)))  # Use tab20 colormap for up to 20 depots
+colors = ['red', 'yellow', 'orange', 'green', 'blue', 'purple']
+depot_colors = {depot['depot_id']: colors[i] for i, depot in depots_gdf.iterrows()}
+print(depot_colors)
+
+cell_coloring = dict(zip(cell_gdf['cell_id'], cell_gdf['closest_depot']))
+
+print(cell_coloring)
+
+feature = voronoi_data['features'][0]
+print(feature['properties']['closest_depot'])
+
+def color_cells(feature):
+    return {
+        'fillColor': depot_colors[str(feature['properties']['closest_depot'])],
+        'color': depot_colors[feature['properties']['closest_depot']],
+        'opacity': 0.99,
+        'weight': 2,
+    }
+
+m2 = Map(center=(region_center.y, region_center.x), zoom=16)
+
+voronoi_layer = GeoJSON(
+    data=voronoi_data, 
+    # style={'color': 'red', 'fillColor': 'lightblue', 'opacity': 0.5, 'weight': 2},
+    style_callback=color_cells,
+    name=voronoi_data['name'])
+m2.add_layer(voronoi_layer)
+
+m2
+```
+
+```python
 
 
-# Visualizations
-fig, ax = plt.subplots(figsize=(12, 12))
-cell_gdf.boundary.plot(ax=ax, color='blue', alpha=0.6, label='Cell Polygons')
+def depot_selection_layers(depot_data, cell_data):
+    depot_layers = {} # dict, where key is depot_id
 
-# potential_depots_gdf = gpd.GeoDataFrame({'geometry': [Point(depot.x, depot.y) for depot in potential_depots]})
-depot_gdf.plot(ax=ax, color='green', marker='o', label='Potential Depots', markersize=3)
+    for feature in depot_data["features"]:
+        depot_plots = [] # Hold range, centerpoint circles
+        coords = feature["geometry"]["coordinates"]
+        properties = feature["properties"]
+        depot_radius = properties.get("depot_radius", 0)  # Default to 0 if missing
+        depot_id = properties.get("depot_id", "Unknown ID")
+        depot_name = f'Depot {depot_id}'
+
+        # Find cells associated with each depot for coloration
+        associated_cells = cell_data.copy()
+        associated_cells['features'] = [feature for feature in cell_data['features']
+                                        if feature['properties']['closest_depot'] == depot_id]
+
+        # Add highlight to cells in depot range
+        cells_layer = GeoJSON(
+            data=associated_cells, 
+            style={'color': 'red', 'fillColor': 'lightblue', 'opacity': 0.5, 'weight': 2},
+            # style_callback=color_cells,
+            name=associated_cells['name'])
 
 
-# Plot selected depots and their coverage
-for depot in depot_gdf.geometry:
-    circle = plt.Circle((depot.x, depot.y), depot_radius, color='red', fill=False, linestyle='--', label='Depot Coverage')
-    ax.add_patch(circle)
-    ax.scatter(depot.x, depot.y, color='red', marker='x', s=100, label='Depot')
+        range_circle = Circle(
+            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
+            radius=depot_radius,  # Circle radius in meters
+            color='black', fill=False, fill_color='#3366cc',
+            fill_opacity=0.05, weight=1,
+            tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
+        )
+        
+        center_circle = CircleMarker(
+            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
+            radius=5,  # Circle radius in meters
+            color='black', fill=True, fill_color='red',
+            fill_opacity=0.9, weight=1,
+            tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
+        )
 
-plt.title("Optimal Depot Placement (ILP Solution)")
-plt.xlabel("X Coordinate")
-plt.ylabel("Y Coordinate")
-# plt.legend()
-plt.grid(True)
-plt.show()
+        depot_layergroup = LayerGroup(
+            layers=(cells_layer, range_circle, center_circle),
+            name=depot_name
+        )
+        depot_layers[depot_id] = depot_layergroup
+    
+    return depot_layers
+```
 
-print(f"Number of depots placed: {len(depot_gdf)}")
+```python
+from ipyleaflet import Choropleth, GeoJSON, WidgetControl
+from ipywidgets import Select, Dropdown
+import matplotlib as plt
+from shapely.geometry import mapping, shape
+import json
 
+
+# Load Data for mapping
+# =====================
+
+# Load the GeoJSON region outline
+with open(region_contour_geojson, "r") as f:
+    region_contour_data = json.load(f)
+region_geometry = shape(region_contour_data['features'][0]['geometry'])
+region_center = region_geometry.centroid
+
+# Load Voronoi cells
+with open(voronoi_partition_filename, "r") as f:
+    voronoi_data = json.load(f)
+
+# Load depot locations
+with open(depots_filename, "r") as f:
+    depot_data = json.load(f)
+
+
+
+# Set up interactive layer selections
+# ===================================
+all_depot_layers = depot_selection_layers(depot_data, voronoi_data) # Dict of layer instances
+list_depots = list(all_depot_layers.keys())
+
+# Depot select widget
+depot_select = Dropdown(
+    options=list_depots,
+    value=list_depots[0],
+    description='Depot:',
+    disabled=False
+)
+
+def on_depot_select(change):
+    old_layer = all_depot_layers[change['old']]
+    new_layer = all_depot_layers[change['new']]
+    m3.substitute(old_layer, new_layer)
+
+depot_select.observe(on_depot_select, names='value')
+
+
+
+
+# Set up interactive map
+# ======================
+m3 = Map(center=(region_center.y, region_center.x), zoom=16)
+
+# Add the region border to the map
+region_layer = GeoJSON(
+    data=region_contour_data, 
+    style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+    name=region_contour_data['name'])
+m3.add_layer(region_layer)
+
+# Add Voronoi polygons
+voronoi_layer = GeoJSON(
+    data=voronoi_data, 
+    style={'color': 'blue', 'fillColor': 'lightblue', 'opacity': 0.25, 'weight': 1},
+    name=voronoi_data['name'])
+m3.add(voronoi_layer)
+
+# Always keep depot points visible
+depot_points = GeoJSON(
+    data=depot_data,
+    style={'color': 'black', 'radius':3, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
+    hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+    point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+    name=depot_data['name']
+)
+m3.add(depot_points)
+
+# Add depot selection dropdown widget
+depot_select_control = WidgetControl(widget=depot_select, position='bottomright')
+m3.add(depot_select_control)
+
+# Add (interactive + dynamic) depot layer
+depot_layer = all_depot_layers[depot_select.value] # Whichever is initially set
+m3.add(depot_layer)
+
+m3.add_control(LayersControl(position='topright'))
+m3.add(ScaleControl(position='bottomleft'))
+m3
+```
+
+```python
+depot_data
+
+list_depots = [feature['properties']['depot_id'] for feature in depot_data['features']]
+print(list_depots)
 ```

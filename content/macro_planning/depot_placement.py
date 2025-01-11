@@ -71,3 +71,48 @@ def find_depots(depot_radius: float, cell_gdf: gpd.GeoDataFrame, region_polygon:
 
     return depots_gdf
 
+
+
+def assign_cells_to_depot(depots_gdf, cell_gdf):
+
+    selected_depots = depots_gdf.geometry
+
+    def distance_to_depot(polygon, depot):
+        return polygon.centroid.distance(Point(depot.x, depot.y))
+
+    # Determine the closest depot for multi-depot cells
+    def closest_depot(polygon, depot_IDs):
+        distances = {i: distance_to_depot(polygon, depots_gdf.loc[depots_gdf['depot_id'] == i]['geometry']) for i in depot_IDs}
+        return min(distances, key=distances.get)
+
+
+    # Assign each cell to its covering depots
+    cell_depots_gdf = cell_gdf.copy() # Create new GDF associating cells with depots
+    cell_depots_gdf['associated_depots'] = cell_depots_gdf['geometry'].apply(
+        lambda polygon: [
+            depot.get("depot_id", i) for i, depot in depots_gdf.iterrows()
+            if polygon.within(depot['geometry'].buffer(depot.get("depot_radius", 0)))
+        ]
+    )
+
+    cell_depots_gdf['closest_depot'] = cell_depots_gdf.apply(
+        lambda row:
+            row['associated_depots'][0]
+            if len(row['associated_depots']) == 1
+            else closest_depot(row['geometry'], row['associated_depots']),
+            axis=1
+    )
+
+
+    # # Prepare a GeoDataFrame for single-depot cells
+    # single_depot_gdf = cell_depots_gdf[cell_depots_gdf['associated_depots'].apply(len) == 1].copy()
+    # single_depot_gdf['depot_id'] = single_depot_gdf['associated_depots'].apply(lambda x: x[0])
+
+    # # Prepare a GeoDataFrame for multi-depot cells
+    # multi_depot_gdf = cell_gdf[cell_depots_gdf['associated_depots'].apply(len) > 1].copy()
+    # multi_depot_gdf['closest_depot'] = multi_depot_gdf.apply(
+    #     lambda row: closest_depot(row['geometry'], row['associated_depots']),
+    #     axis=1
+    # )
+
+    return  cell_depots_gdf

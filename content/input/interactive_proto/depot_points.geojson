@@ -3,8 +3,8 @@
 "name": "depot_points",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
 "features": [
-{ "type": "Feature", "properties": { "depot_radius": 225, "depot_id": "depot_22" }, "geometry": { "type": "Point", "coordinates": [ -103.603934315752412, 30.248971043336141 ] } },
-{ "type": "Feature", "properties": { "depot_radius": 225, "depot_id": "depot_60" }, "geometry": { "type": "Point", "coordinates": [ -103.60172993000208, 30.248871542388269 ] } },
-{ "type": "Feature", "properties": { "depot_radius": 225, "depot_id": "depot_87" }, "geometry": { "type": "Point", "coordinates": [ -103.599929333449964, 30.248886492982095 ] } }
+{ "type": "Feature", "properties": { "depot_radius": 225, "depot_id": "depot_28" }, "geometry": { "type": "Point", "coordinates": [ -103.603648927755131, 30.248836931682686 ] } },
+{ "type": "Feature", "properties": { "depot_radius": 225, "depot_id": "depot_62" }, "geometry": { "type": "Point", "coordinates": [ -103.601863465438896, 30.248687018729427 ] } },
+{ "type": "Feature", "properties": { "depot_radius": 225, "depot_id": "depot_95" }, "geometry": { "type": "Point", "coordinates": [ -103.599445402079837, 30.248751478632958 ] } }
 ]
 }
