@@ -104,15 +104,91 @@ def assign_cells_to_depot(depots_gdf, cell_gdf):
     )
 
 
-    # # Prepare a GeoDataFrame for single-depot cells
-    # single_depot_gdf = cell_depots_gdf[cell_depots_gdf['associated_depots'].apply(len) == 1].copy()
-    # single_depot_gdf['depot_id'] = single_depot_gdf['associated_depots'].apply(lambda x: x[0])
+    # Find minimum enclosing circle of region from depot
+    dict_of_regions = {k:group for k, group in cell_depots_gdf.groupby('closest_depot')}
+    min_enclosing_radii = [] # Add min_enclosing_rad to depots_gdf
 
-    # # Prepare a GeoDataFrame for multi-depot cells
-    # multi_depot_gdf = cell_gdf[cell_depots_gdf['associated_depots'].apply(len) > 1].copy()
-    # multi_depot_gdf['closest_depot'] = multi_depot_gdf.apply(
-    #     lambda row: closest_depot(row['geometry'], row['associated_depots']),
-    #     axis=1
-    # )
+    for i, depot in depots_gdf.iterrows():
+        depot_ID = depot.get("depot_id", i)
+        region_cells = dict_of_regions[depot_ID] # Cells closest to our depot
+
+        if region_cells is not None:
+           center, radius = minimum_enclosing_circle(region_cells)
+        else:
+            radius = 0
+
+        min_enclosing_radii.append(radius)
+        
+    depots_gdf['min_enclosing_rad'] = min_enclosing_radii
+
 
     return  cell_depots_gdf
+
+from scipy.spatial import ConvexHull
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
+
+
+def minimum_enclosing_circle(cell_gdf: gpd.GeoDataFrame) -> tuple:
+    """
+    Compute the minimum enclosing circle for the convex hull of a given GeoDataFrame of cells.
+
+    Parameters:
+        cell_gdf (GeoDataFrame): A GeoDataFrame containing cell geometries.
+
+    Returns:
+        tuple: (center_x, center_y, radius) of the minimum enclosing circle.
+    """
+    def dist(p1, p2):
+        """Compute the Euclidean distance between two points."""
+        return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+
+    def circle_from_three_points(p1, p2, p3):
+        """Compute the circle defined by three points."""
+        ax, ay = p1
+        bx, by = p2
+        cx, cy = p3
+        d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+        ux = ((ax**2 + ay**2) * (by - cy) + (bx**2 + by**2) * (cy - ay) + (cx**2 + cy**2) * (ay - by)) / d
+        uy = ((ax**2 + ay**2) * (cx - bx) + (bx**2 + by**2) * (ax - cx) + (cx**2 + cy**2) * (bx - ax)) / d
+        center = (ux, uy)
+        radius = dist(center, p1)
+        return center, radius
+
+    def welzl(points, boundary):
+        """Recursive function for Welzl's algorithm."""
+        if len(points) == 0 or len(boundary) == 3:
+            if len(boundary) == 0:
+                return (0, 0), 0
+            elif len(boundary) == 1:
+                return boundary[0], 0
+            elif len(boundary) == 2:
+                center = ((boundary[0][0] + boundary[1][0]) / 2, (boundary[0][1] + boundary[1][1]) / 2)
+                radius = dist(boundary[0], boundary[1]) / 2
+                return center, radius
+            elif len(boundary) == 3:
+                return circle_from_three_points(*boundary)
+
+        point = points[-1]
+        center, radius = welzl(points[:-1], boundary)
+
+        if dist(center, point) <= radius:
+            return center, radius
+
+        return welzl(points[:-1], boundary + [point])
+
+    # Compute the convex hull of the combined geometries in the GeoDataFrame
+    convex_hull = cell_gdf.unary_union.convex_hull
+    if not isinstance(convex_hull, Polygon):
+        raise ValueError("Convex hull could not be computed as a valid polygon.")
+
+    # Extract the points from the polygon's exterior
+    points = list(convex_hull.exterior.coords)
+
+    # Compute the convex hull of the points
+    hull = ConvexHull(points)
+    hull_points = [points[vertex] for vertex in hull.vertices]
+
+    # Run Welzl's algorithm on the convex hull points
+    center, radius = welzl(hull_points, [])
+    return center, radius

@@ -95,7 +95,8 @@ sys.path.append(str(Path.cwd().parent))
 #
 # - [x] Display region outline
 # - [x] Display region partition cells, centroids
-# - [ ] Find and indicate depot locations 
+# - [x] Find and indicate depot locations
+# - [ ] Plan routes (pre-target adjustment CV) 
 
 # + tags=["parameters"]
 target_area_acres = 0.5
@@ -136,6 +137,24 @@ cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf)
 
 # for depot_id, depot in updated_cell_gdf.iterrows():
 #     print(f'{depot_id}: {depot["closest_depot"]}')
+
+# +
+from macro_planning.depot_placement import minimum_enclosing_circle
+
+# target_depot = 'depot_99'
+
+# dict_of_groups = {
+#     key: group
+#     for key, group in cell_gdf.groupby('closest_depot')
+# }
+
+# # print(dict_of_groups.keys())
+
+# region_cells = dict_of_groups[target_depot]
+# center, radius = minimum_enclosing_circle(region_cells)
+
+# print(radius)
+depots_gdf
 # -
 
 # #### Write Data to Files
@@ -299,9 +318,9 @@ dict_of_groups = {
 
 # print(dict_of_groups)
 
-key1 = list(dict_of_groups.keys())[0]
-print(len(dict_of_groups.keys()))
-print(dict_of_groups[key1])
+# key1 = list(dict_of_groups.keys())[0]
+# print(len(dict_of_groups.keys()))
+# print(dict_of_groups[key1])
 # print(type(dict_of_groups[key1][0]))
 
 # +
@@ -349,7 +368,10 @@ def depot_selection_layers(depot_data, cell_data):
         depot_plots = [] # Hold range, centerpoint circles
         coords = feature["geometry"]["coordinates"]
         properties = feature["properties"]
-        depot_radius = properties.get("depot_radius", 0)  # Default to 0 if missing
+        depot_radius = int(properties.get("depot_radius", 0))  # Default to 0 if missing
+        min_encl_radius = int(properties.get("min_enclosing_rad", 0))  # Default to 0 if missing
+        valid_depot_range = (depot_radius-min_encl_radius) if min_encl_radius>0 else 0
+
         depot_id = properties.get("depot_id", "Unknown ID")
         depot_name = f'Depot {depot_id}'
 
@@ -366,6 +388,7 @@ def depot_selection_layers(depot_data, cell_data):
             name=associated_cells['name'])
 
 
+        # Maximum range of depot
         range_circle = Circle(
             location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
             radius=depot_radius,  # Circle radius in meters
@@ -373,7 +396,25 @@ def depot_selection_layers(depot_data, cell_data):
             fill_opacity=0.05, weight=1,
             tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
         )
+
+        # Plot our minimum enclosing circle
+        min_enclosing_circle = Circle(
+            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
+            radius=min_encl_radius,  # Circle radius in meters
+            color='green', fill=False, fill_color='#3366cc',
+            fill_opacity=0.05, weight=1, opacity=0.15,
+            tooltip=f"Depot ID: {depot_id}\nRadius: {min_encl_radius}m"
+        )
         
+        # All valid depot placements to cover all cells
+        valid_depots_circle = Circle(
+            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
+            radius=valid_depot_range,  # Circle radius in meters
+            color='green', fill=True, fill_color='green',
+            fill_opacity=0.1, weight=1, opacity=0.35,
+            tooltip=f"Valid depot range: {depot_id}\nRadius: {valid_depot_range}m"
+        )
+
         center_circle = CircleMarker(
             location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
             radius=5,  # Circle radius in meters
@@ -383,7 +424,8 @@ def depot_selection_layers(depot_data, cell_data):
         )
 
         depot_layergroup = LayerGroup(
-            layers=(cells_layer, range_circle, center_circle),
+            layers=(cells_layer, range_circle, min_enclosing_circle, 
+                    valid_depots_circle, center_circle),
             name=depot_name
         )
         depot_layers[depot_id] = depot_layergroup
