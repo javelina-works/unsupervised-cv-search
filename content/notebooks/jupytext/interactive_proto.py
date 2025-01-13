@@ -120,7 +120,12 @@ binary_mask_path = "../outputs/region_binary_mask.tif"
 region_orthophoto_filename = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
 targets_plants_filename = '../input/interactive_proto/targets.geojson'
 
-
+# Macro route planning parameters
+t_max_distance = 1100  # Max distance per trip (meters)
+t_distance_slack = 50
+t_distance_slack_penalty = 10_000
+t_slack_routes = 5
+t_num_vehicles = 25
 
 
 # +
@@ -180,13 +185,61 @@ targets_gdf = identify_targets(full_binary_mask, transform)
 # print(f"Number of targets (detected plants): {len(targets_gdf)}")
 
 # +
-from plant_search.macro_planning import calculate_cell_workloads
+from plant_search.macro_planning import calculate_cell_workloads, targets_to_depots
 
 # Associate each target with a parent cell
-combined = calculate_cell_workloads(cell_gdf, targets_gdf) # Ignore output "combined"
+cell_gdf, targets_gdf = calculate_cell_workloads(cell_gdf, targets_gdf)
+targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w/ a depot
+# -
 
-# print(cell_gdf.crs)
-# print(targets_gdf.crs)
+one_row = depots_gdf.iloc[[0]]
+print(type(one_row))
+
+# +
+from macro_planning.trip_routing import (
+    create_distance_matrix,
+    solve_basic_vrp,
+)
+from macro_planning.visualize_routing import (
+    plot_vrp_solution,
+    distance_matrix_heatmap,
+    distance_matrix_plot_distances
+)
+
+
+base_station_gdf = depots_gdf.iloc[[0]]
+
+compensate_for_targets = True
+t_distance_matrix = create_distance_matrix(cell_gdf, base_station_gdf, compensate_for_targets) # excluding intra-workload cost
+t_num_cells = len(t_distance_matrix)-1 # Number of stops
+# num_vehicles = math.ceil(math.sqrt(num_cells)) + 1
+
+# distance_matrix_heatmap(t_distance_matrix)
+# distance_matrix_plot_distances(cell_gdf, t_distance_matrix, simplified_polygon, base_station_gdf)
+
+# print(f"num_cells: {num_cells}")
+# print(f"num_vehicles: {num_vehicles}")
+
+target_data = {
+    "core": {
+        "distance_matrix": t_distance_matrix,
+        "num_vehicles": t_num_vehicles,
+        "depot_index": t_num_cells,
+        "max_distance": t_max_distance,
+        "distance_slack": t_distance_slack,
+        "distance_slack_penalty": t_distance_slack_penalty,
+        "slack_routes": t_slack_routes
+    }
+}
+
+print_routes = True # Set to True to see individual route statistics
+target_routes = solve_basic_vrp(target_data, print_routes)
+
+# If solved, plot solution
+if target_routes and isinstance(target_routes, list):
+    t_title = "Workload-Compensated Routes"
+    plot_vrp_solution(cell_gdf, t_distance_matrix, simplified_polygon, base_station_gdf, target_routes, t_title)
+
 # -
 
 # #### Write Data to Files

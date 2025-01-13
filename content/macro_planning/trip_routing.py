@@ -121,7 +121,7 @@ def solve_basic_vrp(data, print_routes=False):
         # routing_enums_pb2.FirstSolutionStrategy.LOCAL_CHEAPEST_COST_INSERTION
     )
 
-    search_parameters.time_limit.FromSeconds(45)
+    search_parameters.time_limit.FromSeconds(15)
 
     solution = routing.SolveWithParameters(search_parameters)
     

@@ -44,23 +44,26 @@ def calculate_cell_workloads(cells_gdf, targets_gdf):
     cells_gdf["geometry"] = cells_gdf["geometry"].apply(lambda geom: geom.buffer(0) if not geom.is_valid else geom)
     targets_gdf["geometry"] = targets_gdf["geometry"].apply(lambda geom: geom.buffer(0) if not geom.is_valid else geom)
 
+    updated_cells_gdf = cells_gdf.copy()
+    updated_targets_gdf = targets_gdf.copy()
 
     # 1. Associate targets with cells
-    joined_gdf = gpd.sjoin(targets_gdf, cells_gdf, how="left", predicate="within")
-    targets_gdf["parent_cell_id"] = int(joined_gdf["index_right"])  # Assign cell_id based on spatial join
+    joined_gdf = gpd.sjoin(updated_targets_gdf, updated_cells_gdf, how="left", predicate="intersects")
+    joined_gdf = joined_gdf[joined_gdf["index_right"].notna()]
+    updated_targets_gdf["parent_cell_id"] = joined_gdf["index_right"]  # Assign cell_id based on spatial join
 
+    # Drop targets without a parent_cell_id
+    updated_targets_gdf = updated_targets_gdf[updated_targets_gdf["parent_cell_id"].notna()].copy()
+    
     # 2. Determine total work in each cell
-    # joined = gpd.sjoin(cells_gdf, targets_gdf, how="left", predicate="contains")
-    # joined_gdf = gpd.sjoin(cells_gdf, targets_gdf, how="inner", predicate="intersects") #  Spatial join: count targets within each cell
-    counts = joined_gdf.groupby(targets_gdf['parent_cell_id']).size()  # Count centroids in each cell
-    cells_gdf["target_count"] = counts  # Add counts to cells GeoDataFrame
-    cells_gdf["target_count"] = cells_gdf["target_count"].fillna(0).astype(int)  # Fill NaN with 0
+    counts = updated_targets_gdf.groupby('parent_cell_id').size()  # Count centroids in each cell
+    updated_cells_gdf["target_count"] = updated_cells_gdf.index.map(counts).fillna(0).astype(int)  # Fill NaN with 0
 
      # 2. Calculate workloads for each cell
     workloads = []
-    for cell_id, cell_row in cells_gdf.iterrows():
+    for cell_id, cell_row in updated_cells_gdf.iterrows():
         # Get targets associated with the current cell
-        cell_targets = targets_gdf[targets_gdf["parent_cell_id"] == cell_id]
+        cell_targets = updated_targets_gdf[updated_targets_gdf["parent_cell_id"] == cell_id]
 
         if not cell_targets.empty:
             # Extract target coordinates
@@ -71,10 +74,41 @@ def calculate_cell_workloads(cells_gdf, targets_gdf):
 
         workloads.append(workload)
 
-    cells_gdf["intra_workload"] = workloads # Add workload as a new column in cells_gdf
+    updated_cells_gdf["intra_workload"] = workloads # Add workload as a new column in cells_gdf
 
-    return joined_gdf
+    return updated_cells_gdf, updated_targets_gdf
 
+
+def targets_to_depots(cell_gdf, targets_gdf):
+    """
+    Adds a column to targets_gdf indicating the closest depot based on the parent cell.
+
+    Parameters:
+    - cell_gdf: GeoDataFrame
+        GeoDataFrame of cells with 'geometry' and 'depot' columns.
+    - targets_gdf: GeoDataFrame
+        GeoDataFrame of targets with 'geometry' and 'parent_cell_id' columns.
+
+    Returns:
+    - GeoDataFrame: Updated targets_gdf with a 'closest_depot' column.
+    """
+    # Ensure necessary columns are present
+    if "parent_cell_id" not in targets_gdf.columns or "closest_depot" not in cell_gdf.columns:
+        raise ValueError("Missing required columns: 'parent_cell_id' in targets_gdf or 'closest_depot' in cell_gdf")
+
+    # Initialize the closest_depot column
+    targets_gdf["closest_depot"] = None
+
+    # Iterate over each target
+    for idx, target in targets_gdf.iterrows():
+        parent_cell_id = target["parent_cell_id"] # Get the parent cell ID
+        # if gpd.isna(parent_cell_id):
+        #     continue # If no parent cell, skip this target
+
+        parent_cell = cell_gdf.loc[parent_cell_id] # Get the parent cell row
+        targets_gdf.at[idx, "closest_depot"] = parent_cell["closest_depot"] # Assign the depot as the closest depot
+
+    return targets_gdf
 
 # Useful visualizations
 # ========================
