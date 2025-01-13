@@ -126,6 +126,7 @@ t_distance_slack = 50
 t_distance_slack_penalty = 10_000
 t_slack_routes = 5
 t_num_vehicles = 25
+macro_routes_filename = '../input/interactive_proto/macro_routes.geojson'
 
 
 # +
@@ -194,6 +195,7 @@ targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w
 # +
 from macro_planning.trip_routing import create_distance_matrix, solve_basic_vrp, routes_to_gdf
 from macro_planning.visualize_routing import plot_vrp_solution
+from pandas import concat
 
 target_data = {
     "core": {
@@ -204,6 +206,8 @@ target_data = {
         "slack_routes": t_slack_routes
     }
 }
+
+macro_routes_gdf_list = []
 
 for depot_index in range(len(depots_gdf)):
     base_station_gdf = depots_gdf.iloc[[depot_index]]
@@ -234,17 +238,23 @@ for depot_index in range(len(depots_gdf)):
     if target_routes and isinstance(target_routes, list):
         # t_title = "Workload-Compensated Routes"
         # plot_vrp_solution(station_cells_gdf, t_distance_matrix, simplified_polygon, base_station_gdf, target_routes, t_title)
-        macro_routes_gdf = routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes)
+        depot_macro_routes_gdf = routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes)
+        macro_routes_gdf_list.append(depot_macro_routes_gdf)
     else:
         print("No solution found.")
 
+macro_routes_gdf = gpd.GeoDataFrame(concat(macro_routes_gdf_list, ignore_index=True))
+
+# print(macro_routes_gdf_list)
+# macro_routes_gdf
 # print(len(target_routes))
 # for route in target_routes:
 #     print(route)
 
 # -
 
-target_routes
+# target_routes
+base_station_gdf
 
 # +
 import math 
@@ -309,6 +319,10 @@ depots_gdf.to_file(depots_filename, driver="GeoJSON")
 # Write Targets locations to file
 targets_gdf.to_crs(visualization_crs, inplace=True)
 targets_gdf.to_file(targets_plants_filename, driver="GeoJSON")
+
+# Write Macro-routes to file
+macro_routes_gdf.to_crs(visualization_crs, inplace=True)
+macro_routes_gdf.to_file(macro_routes_filename, driver="GeoJSON")
 # -
 
 # #### Data Interaction with Leaflet
@@ -610,7 +624,43 @@ print(list_depots)
 # - Each cell is associated with a closest serving depot.
 
 # +
-from ipyleaflet import GeoJSON, LayerGroup, CircleMarker
+from ipyleaflet import GeoJSON, LayerGroup, CircleMarker, AntPath
+
+def macro_route_display_layers(depot_data, macro_routes_data):
+    macro_route_layers = {}
+    for depot_feature in depot_data["features"]:
+        properties = depot_feature["properties"]
+        depot_id = properties.get("depot_id", "Unknown ID")
+        coords = depot_feature["geometry"]["coordinates"]
+
+
+        associated_routes = macro_routes_data.copy()
+        associated_routes['features'] = [feature for feature in macro_routes_data['features']
+                                        if feature['properties']['route_depot'] == depot_id]
+
+        routes_layer = GeoJSON(
+            data=associated_routes, 
+            style={'color': 'green', 'fillColor': 'green', 'opacity': 0.25, 'weight': 1},
+            hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
+            name=f'Depot ID: {depot_id} macro routes'
+        )
+
+        center_circle = CircleMarker(
+            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
+            radius=5,  # Circle radius in meters
+            color='black', fill=True, fill_color='red',
+            fill_opacity=0.9, weight=1,
+            tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
+        )
+
+        routes_layergroup = LayerGroup(
+            layers=(routes_layer, center_circle),
+            name=f"{depot_id} Routes"
+        )
+        macro_route_layers[depot_id] = routes_layergroup
+
+    return macro_route_layers
+
 
 def target_display_layers(depot_data, cell_data, targets_data):
     targets_layers = {}
@@ -651,7 +701,7 @@ def target_display_layers(depot_data, cell_data, targets_data):
         targets_layer = GeoJSON(
             data=associated_targets, 
             style={'color': 'red', 'fillColor': 'lightblue', 'opacity': 0.5, 'weight': 2},
-             name=associated_targets['name'])
+            name=associated_targets['name'])
         
         # Display as Circle Marker points
         # targets_layer = GeoJSON(
@@ -684,7 +734,7 @@ from ipywidgets import Select, Dropdown
 import matplotlib as plt
 from shapely.geometry import mapping, shape
 import json
-
+import time
 
 # Load Data for mapping
 # =====================
@@ -706,6 +756,9 @@ with open(depots_filename, "r") as f:
 with open(targets_plants_filename, "r") as f:
     targets_data = json.load(f)
 
+with open(macro_routes_filename, "r") as f:
+    macro_routes_data = json.load(f)
+
 # Set up interactive layer selections
 # ===================================
 all_depot_layers = depot_selection_layers(depot_data, voronoi_data) # Dict of layer instances
@@ -713,6 +766,9 @@ list_depots = list(all_depot_layers.keys())
 
 # Targets associated with each depot
 all_targets_layers = target_display_layers(depot_data, voronoi_data, targets_data)
+
+# Routes associated with each depot
+all_routes_layers = macro_route_display_layers(depot_data, macro_routes_data)
 
 # Depot select widget
 depot_select = Dropdown(
@@ -722,16 +778,58 @@ depot_select = Dropdown(
     disabled=False
 )
 
+
+def focus_depot_on_select(selected_depot_id):
+    
+    # Extract the selected depot's feature from depot_data
+    selected_depot = next(
+        feature for feature in depot_data['features'] if feature['properties']['depot_id'] == selected_depot_id
+    )
+    
+    # Get the depot's center coordinates (assuming Point geometry)
+    depot_lon, depot_lat = selected_depot['geometry']['coordinates']
+    
+    # Get depot range (example property, replace with actual if different)
+    depot_range = selected_depot['properties'].get('min_enclosing_rad', 400)  # Default to 500m if not provided
+    buffer = -3  # Add an extra buffer
+    
+    # Convert range + buffer to approximate degree offsets
+    lat_offset = (depot_range + buffer) / 111000 # 111,000 meters per degree of latitude
+    # lon_offset = lat_offset / abs(depot_lat / 360) # Adjust for longitude scaling at latitude
+    lon_offset = lat_offset / math.cos(math.radians(depot_lat))
+
+    # Calculate bounding box
+    min_lat = depot_lat - lat_offset
+    max_lat = depot_lat + lat_offset
+    min_lon = depot_lon - lon_offset
+    max_lon = depot_lon + lon_offset
+    
+    # Fit the map to the bounding box
+    m3.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
+
+
 def on_depot_select(change):
     # Change depot display layers
     old_layer = all_depot_layers[change['old']]
     new_layer = all_depot_layers[change['new']]
     m3.substitute(old_layer, new_layer)
+    time.sleep(0.1) # Race condition in layer replacement
 
     # Swap out our displayed targets
     old_targets = all_targets_layers[change['old']]
     new_targets = all_targets_layers[change['new']]
     m3.substitute(old_targets, new_targets)
+    time.sleep(0.1) # Race condition in layer replacement
+
+    # Swap out our displayed routes
+    old_routes = all_routes_layers[change['old']]
+    new_routes = all_routes_layers[change['new']]
+    m3.substitute(old_routes, new_routes)
+    time.sleep(0.1) # Race condition in layer replacement
+
+    selected_depot_id = change['new']
+    focus_depot_on_select(selected_depot_id)
+
 
 depot_select.observe(on_depot_select, names='value')
 
@@ -740,7 +838,9 @@ depot_select.observe(on_depot_select, names='value')
 
 # Set up interactive map
 # ======================
-m3 = Map(center=(region_center.y, region_center.x), zoom=16, scroll_wheel_zoom=True)
+m3 = Map(center=(region_center.y, region_center.x), 
+         zoom=16, zoom_snap=0.25, zoom_delta=0.25, scroll_wheel_zoom=True
+)
 
 # Add the region border to the map
 region_layer = GeoJSON(
@@ -777,9 +877,12 @@ depot_layer = all_depot_layers[depot_select.value] # Whichever is initially set
 m3.add(depot_layer)
 
 # Add interactive targeting layer
-# target_select = 'depot_23'
 targets_layer = all_targets_layers[depot_select.value]
 m3.add(targets_layer)
+
+# Add interactive routes layer
+routes_layer = all_routes_layers[depot_select.value]
+m3.add(routes_layer)
 
 draw_control = GeomanDrawControl()
 draw_control.circlemarker = {}
@@ -793,6 +896,12 @@ m3.add(LayersControl(position='topright'))
 m3.add(ScaleControl(position='bottomleft'))
 m3
 # -
+
+# print(all_routes_layers.keys())
+# print(all_routes_layers)
+# print(depot_data)
+print(m3.bounds)
+print(m3.zoom)
 
 # ## Show Routes from each Depot
 #

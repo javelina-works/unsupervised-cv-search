@@ -165,8 +165,12 @@ def routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes):
                     # Must be base station
                     points.append(base_station_gdf.iloc[0].geometry)
                     
+            points.append(base_station_gdf.iloc[0].geometry) # Add back home base
             polylines.append(LineString(points))
 
     # Create a GeoDataFrame for the polylines
-    routes_gdf = gpd.GeoDataFrame({"geometry": polylines}, crs=station_cells_gdf.crs)
+    routes_gdf = gpd.GeoDataFrame({
+        "geometry": polylines,
+        "route_depot": base_station_gdf.iloc[0]["depot_id"]
+    }, crs=station_cells_gdf.crs)
     return routes_gdf
