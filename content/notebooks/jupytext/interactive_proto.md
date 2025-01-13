@@ -125,7 +125,7 @@ region_orthophoto_filename = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-3
 targets_plants_filename = '../input/interactive_proto/targets.geojson'
 
 # Macro route planning parameters
-t_max_distance = 1100  # Max distance per trip (meters)
+t_max_distance = 800  # Max distance per trip (meters)
 t_distance_slack = 50
 t_distance_slack_penalty = 10_000
 t_slack_routes = 5
@@ -200,8 +200,7 @@ targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w
 ```
 
 ```python
-one_row = depots_gdf.iloc[[0]]
-print(type(one_row))
+# station_cells_gdf
 ```
 
 ```python
@@ -216,17 +215,25 @@ from macro_planning.visualize_routing import (
 )
 
 
-base_station_gdf = depots_gdf.iloc[[0]]
+depot_index = 2
+base_station_gdf = depots_gdf.iloc[[depot_index]]
+base_station_id = base_station_gdf.iloc[0]["depot_id"]
+print(base_station_id)
+
+station_cells_gdf = cell_gdf[cell_gdf["closest_depot"] == base_station_id].copy()
+
+
 
 compensate_for_targets = True
-t_distance_matrix = create_distance_matrix(cell_gdf, base_station_gdf, compensate_for_targets) # excluding intra-workload cost
+t_distance_matrix = create_distance_matrix(station_cells_gdf, base_station_gdf, compensate_for_targets) # excluding intra-workload cost
 t_num_cells = len(t_distance_matrix)-1 # Number of stops
 # num_vehicles = math.ceil(math.sqrt(num_cells)) + 1
 
 # distance_matrix_heatmap(t_distance_matrix)
-# distance_matrix_plot_distances(cell_gdf, t_distance_matrix, simplified_polygon, base_station_gdf)
+# distance_matrix_plot_distances(station_cells_gdf, t_distance_matrix, simplified_polygon, base_station_gdf)
 
-# print(f"num_cells: {num_cells}")
+# print(f"num_cells: {t_num_cells}")
+# print(f"Distance matrix size: {len(t_distance_matrix)}")
 # print(f"num_vehicles: {num_vehicles}")
 
 target_data = {
@@ -247,7 +254,7 @@ target_routes = solve_basic_vrp(target_data, print_routes)
 # If solved, plot solution
 if target_routes and isinstance(target_routes, list):
     t_title = "Workload-Compensated Routes"
-    plot_vrp_solution(cell_gdf, t_distance_matrix, simplified_polygon, base_station_gdf, target_routes, t_title)
+    plot_vrp_solution(station_cells_gdf, t_distance_matrix, simplified_polygon, base_station_gdf, target_routes, t_title)
 
 ```
 
