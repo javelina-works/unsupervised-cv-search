@@ -192,46 +192,12 @@ cell_gdf, targets_gdf = calculate_cell_workloads(cell_gdf, targets_gdf)
 targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w/ a depot
 
 # +
-# station_cells_gdf
-
-# +
-from macro_planning.trip_routing import (
-    create_distance_matrix,
-    solve_basic_vrp,
-)
-from macro_planning.visualize_routing import (
-    plot_vrp_solution,
-    distance_matrix_heatmap,
-    distance_matrix_plot_distances
-)
-
-
-depot_index = 2
-base_station_gdf = depots_gdf.iloc[[depot_index]]
-base_station_id = base_station_gdf.iloc[0]["depot_id"]
-print(base_station_id)
-
-station_cells_gdf = cell_gdf[cell_gdf["closest_depot"] == base_station_id].copy()
-
-
-
-compensate_for_targets = True
-t_distance_matrix = create_distance_matrix(station_cells_gdf, base_station_gdf, compensate_for_targets) # excluding intra-workload cost
-t_num_cells = len(t_distance_matrix)-1 # Number of stops
-# num_vehicles = math.ceil(math.sqrt(num_cells)) + 1
-
-# distance_matrix_heatmap(t_distance_matrix)
-# distance_matrix_plot_distances(station_cells_gdf, t_distance_matrix, simplified_polygon, base_station_gdf)
-
-# print(f"num_cells: {t_num_cells}")
-# print(f"Distance matrix size: {len(t_distance_matrix)}")
-# print(f"num_vehicles: {num_vehicles}")
+from macro_planning.trip_routing import create_distance_matrix, solve_basic_vrp, routes_to_gdf
+from macro_planning.visualize_routing import plot_vrp_solution
 
 target_data = {
     "core": {
-        "distance_matrix": t_distance_matrix,
         "num_vehicles": t_num_vehicles,
-        "depot_index": t_num_cells,
         "max_distance": t_max_distance,
         "distance_slack": t_distance_slack,
         "distance_slack_penalty": t_distance_slack_penalty,
@@ -239,14 +205,78 @@ target_data = {
     }
 }
 
-print_routes = True # Set to True to see individual route statistics
-target_routes = solve_basic_vrp(target_data, print_routes)
+for depot_index in range(len(depots_gdf)):
+    base_station_gdf = depots_gdf.iloc[[depot_index]]
+    base_station_id = base_station_gdf.iloc[0]["depot_id"]
+    station_cells_gdf = cell_gdf[cell_gdf["closest_depot"] == base_station_id].copy()
+    
+    compensate_for_targets = True
+    t_distance_matrix = create_distance_matrix(station_cells_gdf, base_station_gdf, compensate_for_targets) # excluding intra-workload cost
+    t_num_cells = len(t_distance_matrix)-1 # Number of stops
 
-# If solved, plot solution
-if target_routes and isinstance(target_routes, list):
-    t_title = "Workload-Compensated Routes"
-    plot_vrp_solution(station_cells_gdf, t_distance_matrix, simplified_polygon, base_station_gdf, target_routes, t_title)
+    target_data = {
+        "core": {
+            "distance_matrix": t_distance_matrix,
+            "num_vehicles": t_num_vehicles,
+            "depot_index": t_num_cells,
+            "max_distance": t_max_distance,
+            "distance_slack": t_distance_slack,
+            "distance_slack_penalty": t_distance_slack_penalty,
+            "slack_routes": t_slack_routes
+        }
+    }
 
+    print_routes = False # Set to True to see individual route statistics
+    target_routes = solve_basic_vrp(target_data, print_routes)
+
+
+
+    if target_routes and isinstance(target_routes, list):
+        # t_title = "Workload-Compensated Routes"
+        # plot_vrp_solution(station_cells_gdf, t_distance_matrix, simplified_polygon, base_station_gdf, target_routes, t_title)
+        macro_routes_gdf = routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes)
+    else:
+        print("No solution found.")
+
+# print(len(target_routes))
+# for route in target_routes:
+#     print(route)
+
+# -
+
+target_routes
+
+# +
+import math 
+import matplotlib.pyplot as plt
+
+base_station = base_station_gdf.geometry.iloc[0]  # Assuming single base station
+
+# Plot centroids, region outline, and base station
+fig, ax = plt.subplots(figsize=(12, 10))
+region_outline_gdf.boundary.plot(ax=ax, color="blue", linestyle="--", label="Simplified Region Outline")
+cell_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
+base_station_gdf.plot(ax=ax, color='red', markersize=80, marker='*', zorder=10, label='Base Station')
+
+centroids = station_cells_gdf.cell_centroid
+for i, centroid in enumerate(centroids):
+    ax.scatter(centroid.x, centroid.y, color='blue', s=20, alpha=0.5, label='Centroid' if i == 0 else "")
+    ax.text(centroid.x, centroid.y, str(i), fontsize=10, ha='right')
+
+# Generate a colormap for routes
+cmap = plt.get_cmap("tab20", len(macro_routes_gdf))  # Tab10 provides distinct colors
+for route_idx, (index, row) in enumerate(macro_routes_gdf.iterrows()):
+    ax.plot(*row.geometry.xy, color=cmap(route_idx), label=f"Route {index}")
+
+ax.legend(loc="upper right", fontsize="small", title="Routes", ncol=2)
+
+# Final plot details
+ax.set_title("Route polylines", fontsize=16)
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+ax.legend(loc='upper right', fontsize=10)
+plt.grid(True)
+plt.show()
 # -
 
 # #### Write Data to Files

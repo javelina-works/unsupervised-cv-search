@@ -1,5 +1,8 @@
 import numpy as np
 import math
+from shapely.geometry import LineString
+import geopandas as gpd
+
 
 def create_distance_matrix(cell_gdf, base_station_gdf, workload_compensated=False):
     num_cells = len(cell_gdf)
@@ -142,4 +145,28 @@ def solve_basic_vrp(data, print_routes=False):
     else:
         print("No solution found.")
         return None
-    
+
+
+
+def routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes):
+    filtered_routes = [route for route in target_routes if len(route) > 1]
+
+    num_station_cells = len(station_cells_gdf)
+
+    # Convert route indices into actual points
+    polylines = []
+    for route in filtered_routes:
+            points = []
+            for index in route:
+                if index < num_station_cells:
+                    # Point from station_cells_gdf
+                    points.append(station_cells_gdf.iloc[index].cell_centroid)
+                else:
+                    # Must be base station
+                    points.append(base_station_gdf.iloc[0].geometry)
+                    
+            polylines.append(LineString(points))
+
+    # Create a GeoDataFrame for the polylines
+    routes_gdf = gpd.GeoDataFrame({"geometry": polylines}, crs=station_cells_gdf.crs)
+    return routes_gdf
