@@ -47,7 +47,7 @@ def calculate_cell_workloads(cells_gdf, targets_gdf):
 
     # 1. Associate targets with cells
     joined_gdf = gpd.sjoin(targets_gdf, cells_gdf, how="left", predicate="within")
-    targets_gdf["parent_cell_id"] = joined_gdf["index_right"]  # Assign cell_id based on spatial join
+    targets_gdf["parent_cell_id"] = int(joined_gdf["index_right"])  # Assign cell_id based on spatial join
 
     # 2. Determine total work in each cell
     # joined = gpd.sjoin(cells_gdf, targets_gdf, how="left", predicate="contains")

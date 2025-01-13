@@ -103,19 +103,29 @@ print(type(loaded_gdf))
 - [ ] Plan routes (pre-target adjustment CV) 
 
 ```python tags=["parameters"]
+# Cell generation parameters
 target_area_acres = 0.5
 # target_area_acres = 1.5
 # target_area_acres = 2.5
 
 target_area_sqm = target_area_acres * 4046.86
 max_iterations = 15 # Cycles to find improved partition
-
 voronoi_partition_filename = '../input/interactive_proto/voronoi_partition.geojson'
 voronoi_centroids_filename = '../input/interactive_proto/voronoi_centroids.geojson'
 
 # Depot placement parameters
 depot_radius = 225  # Max distance a depot can cover
+grid_density = 4
 depots_filename = '../input/interactive_proto/depot_points.geojson'
+
+
+# Target detection parameters
+binary_mask_path = "../outputs/region_binary_mask.tif"
+region_orthophoto_filename = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
+targets_plants_filename = '../input/interactive_proto/targets.geojson'
+
+
+
 ```
 
 ```python
@@ -124,43 +134,66 @@ from macro_planning.depot_placement import find_depots, assign_cells_to_depot
 
 region_outline_gdf = gpd.read_file(region_contour_shapefile)
 simplified_polygon = region_outline_gdf.geometry.iloc[0]
-# print(loaded_gdf.crs)
 num_cells = int(simplified_polygon.area / target_area_sqm) # How many cells to generate
 
 # Divide region into voronoi cells
 cell_gdf = centroidal_voronoi_tessellation(simplified_polygon, num_cells, max_iterations)
 
 # Find depots to cover all cells
-grid_density = 4
 depots_gdf = find_depots(depot_radius, cell_gdf, region_outline_gdf, grid_density)
-
-# for depot_id, depot in depots_gdf.iterrows():
-#     print(f'{depot_id}: {depot["geometry"]}')
-
-cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf)
-
+assign_cells_to_depot(depots_gdf, cell_gdf) # Updates both GDFs in place
 
 # for depot_id, depot in updated_cell_gdf.iterrows():
 #     print(f'{depot_id}: {depot["closest_depot"]}')
 ```
 
+### Find Targets
+
+Testing multiple approaches:
+1. From full-sized orthophoto
+2. From downscaled orthophoto
+3. From pre-computed binary mask
+
+<!-- #raw vscode={"languageId": "raw"} -->
+from plant_search.load_image import load_image
+from plant_search.image_preprocess import generate_target_mask, identify_targets
+
+# Approach 1: from full-sized orthopho
+image, transform, bounds, image_crs = load_image(region_orthophoto_filename)
+binary_mask = generate_target_mask(image) # Mask from original image
+targets_gdf = identify_targets(binary_mask, transform)
+
+print(f"Image dimensions: {image.shape}")
+print(f"Number of targets (detected plants): {len(targets_gdf)}")
+<!-- #endraw -->
+
 ```python
-from macro_planning.depot_placement import minimum_enclosing_circle
+from plant_search.image_preprocess import correct_binary_mask, identify_targets
+from plant_search.load_image import load_image
+import rasterio
 
-# target_depot = 'depot_99'
+# Approach 3: from full-sized orthophoto
+image, transform, bounds, image_crs = load_image(region_orthophoto_filename)
 
-# dict_of_groups = {
-#     key: group
-#     for key, group in cell_gdf.groupby('closest_depot')
-# }
+with rasterio.open(binary_mask_path) as src:
+    binary_mask = src.read(1)  # Read the first band
+    
+full_binary_mask = correct_binary_mask(binary_mask, image.shape)
+targets_gdf = identify_targets(full_binary_mask, transform)
 
-# # print(dict_of_groups.keys())
+# # del full_binary_mask # Gimme back my RAM
+# print(f"Binary mask dimensions: {binary_mask.shape}")
+# print(f"Number of targets (detected plants): {len(targets_gdf)}")
+```
 
-# region_cells = dict_of_groups[target_depot]
-# center, radius = minimum_enclosing_circle(region_cells)
+```python
+from plant_search.macro_planning import calculate_cell_workloads
 
-# print(radius)
-depots_gdf
+# Associate each target with a parent cell
+combined = calculate_cell_workloads(cell_gdf, targets_gdf) # Ignore output "combined"
+
+# print(cell_gdf.crs)
+# print(targets_gdf.crs)
 ```
 
 #### Write Data to Files
@@ -190,6 +223,9 @@ centroid_gdf.to_file(voronoi_centroids_filename, driver="GeoJSON")
 depots_gdf.to_crs(visualization_crs, inplace=True)
 depots_gdf.to_file(depots_filename, driver="GeoJSON")
 
+# Write Targets locations to file
+targets_gdf.to_crs(visualization_crs, inplace=True)
+targets_gdf.to_file(targets_plants_filename, driver="GeoJSON")
 ```
 
 #### Data Interaction with Leaflet
@@ -305,70 +341,9 @@ m.add(ScaleControl(position='bottomleft'))
 m # Display the map
 ```
 
-## Show Routes from each Depot
-
-- Show cells associated with each depot
-- Show routes to cover all cells from each depot
+## Minimal Depot Interactions
 
 ```python
-cell_group_gdfs = [x for _, x in cell_gdf.groupby('closest_depot')]
-
-print(len(cell_group_gdfs))
-print(type(cell_group_gdfs[0]))
-
-# cell_gdf_dict = cell_gdf.groupby('closest_depot').apply().to_dict()
-dict_of_groups = {
-    key: group
-    for key, group in cell_gdf.groupby('closest_depot')
-}
-
-# print(dict_of_groups)
-
-# key1 = list(dict_of_groups.keys())[0]
-# print(len(dict_of_groups.keys()))
-# print(dict_of_groups[key1])
-# print(type(dict_of_groups[key1][0]))
-```
-
-```python
-from ipyleaflet import Choropleth, GeoJSON
-import matplotlib as plt
-
-colors = plt.cm.tab20(range(len(depots_gdf)))  # Use tab20 colormap for up to 20 depots
-colors = ['red', 'yellow', 'orange', 'green', 'blue', 'purple']
-depot_colors = {depot['depot_id']: colors[i] for i, depot in depots_gdf.iterrows()}
-print(depot_colors)
-
-cell_coloring = dict(zip(cell_gdf['cell_id'], cell_gdf['closest_depot']))
-
-print(cell_coloring)
-
-feature = voronoi_data['features'][0]
-print(feature['properties']['closest_depot'])
-
-def color_cells(feature):
-    return {
-        'fillColor': depot_colors[str(feature['properties']['closest_depot'])],
-        'color': depot_colors[feature['properties']['closest_depot']],
-        'opacity': 0.99,
-        'weight': 2,
-    }
-
-m2 = Map(center=(region_center.y, region_center.x), zoom=16)
-
-voronoi_layer = GeoJSON(
-    data=voronoi_data, 
-    # style={'color': 'red', 'fillColor': 'lightblue', 'opacity': 0.5, 'weight': 2},
-    style_callback=color_cells,
-    name=voronoi_data['name'])
-m2.add_layer(voronoi_layer)
-
-m2
-```
-
-```python
-
-
 def depot_selection_layers(depot_data, cell_data):
     depot_layers = {} # dict, where key is depot_id
 
@@ -484,7 +459,7 @@ depot_select = Dropdown(
 def on_depot_select(change):
     old_layer = all_depot_layers[change['old']]
     new_layer = all_depot_layers[change['new']]
-    m3.substitute(old_layer, new_layer)
+    m2.substitute(old_layer, new_layer)
 
 depot_select.observe(on_depot_select, names='value')
 
@@ -493,20 +468,213 @@ depot_select.observe(on_depot_select, names='value')
 
 # Set up interactive map
 # ======================
-m3 = Map(center=(region_center.y, region_center.x), zoom=16)
+m2 = Map(center=(region_center.y, region_center.x), zoom=16, scroll_wheel_zoom=True)
 
 # Add the region border to the map
 region_layer = GeoJSON(
     data=region_contour_data, 
     style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
     name=region_contour_data['name'])
-m3.add_layer(region_layer)
+# region_layer.pmIgnore = True  # Lock this layer
+m2.add(region_layer)
 
 # Add Voronoi polygons
 voronoi_layer = GeoJSON(
     data=voronoi_data, 
     style={'color': 'blue', 'fillColor': 'lightblue', 'opacity': 0.25, 'weight': 1},
     name=voronoi_data['name'])
+voronoi_layer.pmIgnore = True  # Lock this layer
+m2.add(voronoi_layer)
+
+# Always keep depot points visible
+depot_points = GeoJSON(
+    data=depot_data,
+    style={'color': 'black', 'radius':3, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
+    hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+    point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+    name=depot_data['name']
+)
+m2.add(depot_points)
+
+# Add depot selection dropdown widget
+depot_select_control = WidgetControl(widget=depot_select, position='bottomright')
+m2.add(depot_select_control)
+
+# Add (interactive + dynamic) depot layer
+depot_layer = all_depot_layers[depot_select.value] # Whichever is initially set
+m2.add(depot_layer)
+
+draw_control = GeomanDrawControl()
+draw_control.circlemarker = {}
+draw_control.rotate = False
+m2.add(draw_control)
+
+m2.add(FullScreenControl(position='topleft'))
+m2.add(LayersControl(position='topright'))
+m2.add(ScaleControl(position='bottomleft'))
+m2
+```
+
+```python
+depot_data
+
+list_depots = [feature['properties']['depot_id'] for feature in depot_data['features']]
+print(list_depots)
+```
+
+## Display Targets w/ Cell Depot
+
+- Each identified target is to be associated with a cell.
+- Each cell is associated with a closest serving depot.
+
+```python
+from ipyleaflet import GeoJSON, LayerGroup, CircleMarker
+
+def target_display_layers(depot_data, cell_data, targets_data):
+    targets_layers = {}
+
+    # 1) Associate each target with parent cell
+    cell_targets = {} # dict, where key is depot_id
+    for cell_feature in cell_data['features']:
+        cell_properties = cell_feature['properties']
+        cell_id = cell_properties.get("cell_id", "Unknown ID")
+
+        # associated_targets = targets_data.copy()
+        associated_targets = [feature for feature in targets_data['features']
+                                        if feature['properties']['parent_cell_id'] == cell_id]
+        cell_targets[cell_id] = associated_targets
+
+
+    # 2) Associate each cell with depot
+    depot_to_targets = {}
+    for depot_feature in depot_data["features"]:
+        properties = depot_feature["properties"]
+        depot_id = properties.get("depot_id", "Unknown ID")
+        coords = depot_feature["geometry"]["coordinates"]
+
+        # Find cells associated with each depot for coloration
+        associated_targets = targets_data.copy()
+        associated_cell_ids = [feature['properties']['cell_id'] for feature in cell_data['features']
+                                        if feature['properties']['closest_depot'] == depot_id]
+        depot_targets = []
+        for cell_id in associated_cell_ids:
+            depot_targets += cell_targets[cell_id]
+        associated_targets['features'] = depot_targets
+
+        depot_to_targets[depot_id] = associated_targets
+
+        # 3) Create targets layers
+
+        # Display as Markers
+        targets_layer = GeoJSON(
+            data=associated_targets, 
+            style={'color': 'red', 'fillColor': 'lightblue', 'opacity': 0.5, 'weight': 2},
+             name=associated_targets['name'])
+        
+        # Display as Circle Marker points
+        # targets_layer = GeoJSON(
+        #     data=associated_targets,
+        #     style={'color': 'black', 'radius':3, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'fillOpacity':0.6},
+        #     hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+        #     point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+        #     name=associated_targets['name']
+        # )
+        
+        center_circle = CircleMarker(
+            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
+            radius=5,  # Circle radius in meters
+            color='black', fill=True, fill_color='red',
+            fill_opacity=0.9, weight=1,
+            tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
+        )
+        
+        targets_layergroup = LayerGroup(
+            layers=(targets_layer, center_circle),
+            name=f"{depot_id} Targets"
+        )
+        targets_layers[depot_id] = targets_layergroup
+
+    return targets_layers
+```
+
+```python
+from ipyleaflet import Choropleth, GeoJSON, WidgetControl, FullScreenControl, GeomanDrawControl
+from ipywidgets import Select, Dropdown
+import matplotlib as plt
+from shapely.geometry import mapping, shape
+import json
+
+
+# Load Data for mapping
+# =====================
+
+# Load the GeoJSON region outline
+with open(region_contour_geojson, "r") as f:
+    region_contour_data = json.load(f)
+region_geometry = shape(region_contour_data['features'][0]['geometry'])
+region_center = region_geometry.centroid
+
+# Load Voronoi cells
+with open(voronoi_partition_filename, "r") as f:
+    voronoi_data = json.load(f)
+
+# Load depot locations
+with open(depots_filename, "r") as f:
+    depot_data = json.load(f)
+
+with open(targets_plants_filename, "r") as f:
+    targets_data = json.load(f)
+
+# Set up interactive layer selections
+# ===================================
+all_depot_layers = depot_selection_layers(depot_data, voronoi_data) # Dict of layer instances
+list_depots = list(all_depot_layers.keys())
+
+# Targets associated with each depot
+all_targets_layers = target_display_layers(depot_data, voronoi_data, targets_data)
+
+# Depot select widget
+depot_select = Dropdown(
+    options=list_depots,
+    value=list_depots[0],
+    description='Depot:',
+    disabled=False
+)
+
+def on_depot_select(change):
+    # Change depot display layers
+    old_layer = all_depot_layers[change['old']]
+    new_layer = all_depot_layers[change['new']]
+    m3.substitute(old_layer, new_layer)
+
+    # Swap out our displayed targets
+    old_targets = all_targets_layers[change['old']]
+    new_targets = all_targets_layers[change['new']]
+    m3.substitute(old_targets, new_targets)
+
+depot_select.observe(on_depot_select, names='value')
+
+
+
+
+# Set up interactive map
+# ======================
+m3 = Map(center=(region_center.y, region_center.x), zoom=16, scroll_wheel_zoom=True)
+
+# Add the region border to the map
+region_layer = GeoJSON(
+    data=region_contour_data, 
+    style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+    name=region_contour_data['name'])
+# region_layer.pmIgnore = True  # Lock this layer
+m3.add(region_layer)
+
+# Add Voronoi polygons
+voronoi_layer = GeoJSON(
+    data=voronoi_data, 
+    style={'color': 'blue', 'fillColor': 'lightblue', 'opacity': 0.25, 'weight': 1},
+    name=voronoi_data['name'])
+voronoi_layer.pmIgnore = True  # Lock this layer
 m3.add(voronoi_layer)
 
 # Always keep depot points visible
@@ -527,20 +695,25 @@ m3.add(depot_select_control)
 depot_layer = all_depot_layers[depot_select.value] # Whichever is initially set
 m3.add(depot_layer)
 
-# draw_control = GeomanDrawControl()
-# draw_control.circlemarker = {}
-# draw_control.rotate = False
-# m3.add(draw_control)
+# Add interactive targeting layer
+# target_select = 'depot_23'
+targets_layer = all_targets_layers[depot_select.value]
+m3.add(targets_layer)
+
+draw_control = GeomanDrawControl()
+draw_control.circlemarker = {}
+draw_control.rotate = False
+draw_control.cut = False
+draw_control.drag = False
+m3.add(draw_control)
 
 m3.add(FullScreenControl(position='topleft'))
-m3.add_control(LayersControl(position='topright'))
+m3.add(LayersControl(position='topright'))
 m3.add(ScaleControl(position='bottomleft'))
 m3
 ```
 
-```python
-depot_data
+## Show Routes from each Depot
 
-list_depots = [feature['properties']['depot_id'] for feature in depot_data['features']]
-print(list_depots)
-```
+- Show cells associated with each depot
+- Show routes to cover all cells from each depot
