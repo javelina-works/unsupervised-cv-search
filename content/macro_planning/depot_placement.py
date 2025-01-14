@@ -119,6 +119,8 @@ def assign_cells_to_depot(depots_gdf, cell_gdf):
     # Final update to depots_gdf  
     depots_gdf['min_enclosing_rad'] = min_enclosing_radii
 
+    return depots_gdf, cell_gdf
+
 
 from scipy.spatial import ConvexHull
 from shapely.geometry import Polygon
