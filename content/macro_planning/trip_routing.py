@@ -154,23 +154,35 @@ def routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes):
     num_station_cells = len(station_cells_gdf)
 
     # Convert route indices into actual points
+    route_ids = []
     polylines = []
-    for route in filtered_routes:
+    route_cells = []
+    depot_id = base_station_gdf.iloc[0]["depot_id"]
+
+    for i, route in enumerate(filtered_routes):
+            cell_ids = []
             points = []
             for index in route:
                 if index < num_station_cells:
                     # Point from station_cells_gdf
                     points.append(station_cells_gdf.iloc[index].cell_centroid)
+                    cell_ids.append(station_cells_gdf.iloc[index]['cell_id'])
                 else:
                     # Must be base station
                     points.append(base_station_gdf.iloc[0].geometry)
                     
             points.append(base_station_gdf.iloc[0].geometry) # Add back home base
+            
+            route_id = f"{depot_id}_R{i}"
+            route_ids.append(route_id)
             polylines.append(LineString(points))
+            route_cells.append(cell_ids)
 
     # Create a GeoDataFrame for the polylines
     routes_gdf = gpd.GeoDataFrame({
         "geometry": polylines,
-        "route_depot": base_station_gdf.iloc[0]["depot_id"]
+        "route_id": route_ids,
+        "route_depot": depot_id,
+        "route_cells": route_cells
     }, crs=station_cells_gdf.crs)
     return routes_gdf

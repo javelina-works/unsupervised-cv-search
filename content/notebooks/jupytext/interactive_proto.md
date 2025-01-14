@@ -125,7 +125,7 @@ region_orthophoto_filename = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-3
 targets_plants_filename = '../input/interactive_proto/targets.geojson'
 
 # Macro route planning parameters
-t_max_distance = 800  # Max distance per trip (meters)
+t_max_distance = 850  # Max distance per trip (meters)
 t_distance_slack = 50
 t_distance_slack_penalty = 10_000
 t_slack_routes = 5
@@ -255,6 +255,7 @@ macro_routes_gdf = gpd.GeoDataFrame(concat(macro_routes_gdf_list, ignore_index=T
 
 # print(macro_routes_gdf_list)
 # macro_routes_gdf
+print(macro_routes_gdf.keys())
 # print(len(target_routes))
 # for route in target_routes:
 #     print(route)
@@ -262,8 +263,28 @@ macro_routes_gdf = gpd.GeoDataFrame(concat(macro_routes_gdf_list, ignore_index=T
 ```
 
 ```python
-# target_routes
-base_station_gdf
+import geopandas as gpd
+
+def associate_targets_with_routes(targets_gdf, macro_routes_gdf):
+    # Initialize a new column for route_id in targets_gdf
+    targets_gdf["route_id"] = None
+
+    # Iterate through the macro_routes_gdf rows
+    for _, route_row in macro_routes_gdf.iterrows():
+        route_id = route_row["route_id"]
+        route_cells = route_row["route_cells"]
+        
+        # Update targets_gdf: Assign route_id to targets whose parent_cell_id is in route_cells
+        targets_gdf.loc[targets_gdf["parent_cell_id"].isin(route_cells), "route_id"] = route_id
+
+    return targets_gdf
+
+routed_targets_gdf = associate_targets_with_routes(targets_gdf, macro_routes_gdf)
+# routed_targets_gdf
+```
+
+```python
+
 ```
 
 ```python
@@ -840,7 +861,7 @@ def on_depot_select(change):
     time.sleep(0.1) # Race condition in layer replacement
 
     selected_depot_id = change['new']
-    focus_depot_on_select(selected_depot_id)
+    # focus_depot_on_select(selected_depot_id)
 
 
 depot_select.observe(on_depot_select, names='value')
@@ -904,7 +925,7 @@ draw_control.drag = False
 m3.add(draw_control)
 
 m3.add(FullScreenControl(position='topleft'))
-m3.add(LayersControl(position='topright'))
+m3.add(LayersControl(position='topright', collapsed=False))
 m3.add(ScaleControl(position='bottomleft'))
 m3
 ```
