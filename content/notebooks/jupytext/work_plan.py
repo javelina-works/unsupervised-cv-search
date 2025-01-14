@@ -249,7 +249,7 @@ data = {
     }
 }
 
-print_routes = False # Set to True to see individual route statistics
+print_routes = True # Set to True to see individual route statistics
 routes = solve_basic_vrp(data, print_routes)
 
 # If solved, plot solution

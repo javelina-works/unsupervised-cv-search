@@ -164,6 +164,45 @@ depots_gdf, cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf) # No update G
 #     print(f'{depot_id}: {depot["closest_depot"]}')
 ```
 
+```python
+from macro_planning.depot_placement import create_cells_depots_df
+from macro_planning.trip_routing import assign_targets_to_routes
+
+cells_depots_df = create_cells_depots_df(depots_gdf, cell_gdf)
+# cells_depots_df
+
+
+```
+
+<!-- #region -->
+## Data Generation & Calculation
+
+### Static Data
+What we will assume to be the same even across multiple visits or treatment sessions.
+- `region_outline_gdf`: Where we are working
+- `cells_gdf`: Cells dividing our working region
+- `targets_gdf`: Plants in the working area to be treated
+
+
+---
+
+### Ephemeral Data
+Data which may be frequently re-calculated as needed based on the working environment and requirements.
+- `depots_gdf`: Depots across working region for launching/landing drones
+- 
+
+#### Relational Ephemeral Data
+Data which relates two or more of the above data structures to find useful results. We should assume that these will be frequently re-calculated.
+- `cells_depots_df`: Associates each cell of our region with a serving depot
+- `cells_workloads_df`: Relative amount of work to treat all targets in a cell
+- `targets_routing_df`: Associates each target with an enclosing parent cell
+- 
+
+
+---
+
+<!-- #endregion -->
+
 ### Find Targets
 
 Testing multiple approaches:
@@ -205,23 +244,13 @@ targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w
 ```
 
 ```python
-targets_gdf
+targets_gdf.dtypes
 ```
 
 ```python
 from macro_planning.trip_routing import create_distance_matrix, solve_basic_vrp, routes_to_gdf
 from macro_planning.visualize_routing import plot_vrp_solution
 from pandas import concat
-
-target_data = {
-    "core": {
-        "num_vehicles": t_num_vehicles,
-        "max_distance": t_max_distance,
-        "distance_slack": t_distance_slack,
-        "distance_slack_penalty": t_distance_slack_penalty,
-        "slack_routes": t_slack_routes
-    }
-}
 
 macro_routes_gdf_list = []
 
@@ -268,6 +297,10 @@ macro_routes_gdf = gpd.GeoDataFrame(concat(macro_routes_gdf_list, ignore_index=T
 # for route in target_routes:
 #     print(route)
 
+```
+
+```python
+macro_routes_gdf
 ```
 
 ```python

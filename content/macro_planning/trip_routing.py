@@ -2,7 +2,7 @@ import numpy as np
 import math
 from shapely.geometry import LineString
 import geopandas as gpd
-
+import pandas as pd
 
 def create_distance_matrix(cell_gdf, base_station_gdf, workload_compensated=False):
     num_cells = len(cell_gdf)
@@ -188,36 +188,20 @@ def routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes):
     return routes_gdf
 
 
-def create_macro_routes():
-    """
-    Assuming that we have determined our depot placements, we now  begin routing.
+
+
+def assign_targets_to_routes(targets_gdf, depots_gdf):
+    assignments = []
+    for _, target in targets_gdf.iterrows():
+        closest_depot = depots_gdf.iloc[target["geometry"].distance(depots_gdf["geometry"]).idxmin()]
+        assignments.append({
+            "target_id": target.name,  # Assuming unique index as ID
+            "route_id": f"route_{closest_depot['depot_id']}",  # Example route naming
+            "depot_id": closest_depot["depot_id"]
+        })
     
-    - ? What are the inputs here? What is needed to plan each macro route?
-        - GDF of depot placements
-        - GDF of cells
-        - GDF of targets
-    - Assignment to a closest depot:
-        - Cells
-        - Targets within said cells (should not have a closest depot?)
-            - How might we best normalize targets_gdf?
-            - Do we want targets associated with a depot or a cell?
-            - Different GDFs for targets with closest_depot, etc?
-
-    
-    
-    - ? Assigning cells to each depot?
-    - 
+    return pd.DataFrame(assignments)
 
 
-    Args:
-        routing (RoutingModel): The OR-Tools RoutingModel.
-        manager (RoutingIndexManager): The OR-Tools RoutingIndexManager.
-        core_data (dict): A dictionary containing the data needed for core distance constraint solving
 
-    Returns:
-        Dimension: The configured distance dimension.
-    """
-
-
-    return
 
