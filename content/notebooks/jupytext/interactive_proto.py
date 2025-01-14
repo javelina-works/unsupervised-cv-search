@@ -98,6 +98,16 @@ sys.path.append(str(Path.cwd().parent))
 # - [x] Find and indicate depot locations
 # - [ ] Plan routes (pre-target adjustment CV) 
 
+# Possible Improvements:
+# - Manually place depots: have it reflect efficiency of placements
+# - What do we actually deliver to a client/NRCS to prove we did the routes?
+#     - Maybe ask Cade what he would like to see
+# - What would we need to change/update before handing this off to Cade?
+# - Builds into flight-tracking platform?
+# - How can we package this into something more user friendly?
+# - TODO: close loop on route waypoint file generation
+# - Is GPS accurate enough?
+
 # + tags=["parameters"]
 # Cell generation parameters
 target_area_acres = 0.5
@@ -414,8 +424,6 @@ def calculate_all_routes_tsp(routed_targets_gdf, depot_point_gdf):
     route_targets_gdf = routed_targets_gdf[routed_targets_gdf['closest_depot'] == plot_depot_id]
     depot_point = depots_gdf.iloc[0]['geometry']
 
-    print(route_targets_gdf)
-
     for route_id in unique_route_ids:
         route_targets = route_targets_gdf[route_targets_gdf["route_id"] == route_id]
         if not route_targets.empty:
@@ -427,16 +435,19 @@ def calculate_all_routes_tsp(routed_targets_gdf, depot_point_gdf):
 
 
 # +
+# Mystery: why does the CRS sometimes change?
+# routed_targets_gdf
+
+# +
 depot_point_gdf = depots_gdf.iloc[[0]] # GDF of just one row
 
 results = calculate_all_routes_tsp(routed_targets_gdf, depot_point_gdf)
 
-# Print results for each route
-for route_id, data in results.items():
-    print(f"Route ID: {route_id}")
-    print(f"Ordered Points: {data['ordered_points']}")
-    print(f"Total Distance: {data['total_distance']:.2f}")
-
+# # Print results for each route
+# for route_id, data in results.items():
+#     print(f"Route ID: {route_id}")
+#     print(f"Ordered Points: {data['ordered_points']}")
+#     print(f"Total Distance: {data['total_distance']:.2f}")
 
 # +
 def plot_routes(results, depot_point, macro_routes_gdf):
@@ -478,7 +489,62 @@ def plot_routes(results, depot_point, macro_routes_gdf):
 
 # Example usage with dummy data
 # Replace with real data as required
+depot_point = depots_gdf.iloc[0]['geometry']
 plot_routes(results, depot_point, macro_routes_gdf)  # Uncomment and replace with actual variables
+
+
+# +
+from shapely.geometry import LineString
+import geopandas as gpd
+
+def create_micro_routes_gdf(results, macro_routes_gdf, depot_point):
+    """
+    Create a GeoDataFrame of polylines for the solved micro routes.
+
+    Parameters:
+    - results: dict
+        Dictionary of TSP results, where keys are route_ids and values are
+        {'ordered_points': list of shapely.geometry.Point, 'total_distance': float}.
+    - macro_routes_gdf: GeoDataFrame
+        GeoDataFrame containing route information (e.g., route_cells, route_id).
+    - depot_point: shapely.geometry.Point
+        Coordinates of the depot.
+
+    Returns:
+    - routes_gdf: GeoDataFrame
+        GeoDataFrame of polylines with columns for 'route_id', 'closest_depot', and 'route_cells'.
+    """
+    route_ids = []
+    polylines = []
+    closest_depots = []
+    route_cells_list = []
+
+    for route_id, data in results.items():
+        ordered_points = data['ordered_points']
+        route_line = LineString(ordered_points)  # Create a LineString from the ordered points
+
+        # Get the corresponding row in macro_routes_gdf for additional attributes
+        macro_route_row = macro_routes_gdf[macro_routes_gdf['route_id'] == route_id].iloc[0]
+        route_cells = macro_route_row['route_cells']
+
+        # Append data for the GeoDataFrame
+        route_ids.append(route_id)
+        polylines.append(route_line)
+        closest_depots.append(depot_point)
+        route_cells_list.append(route_cells)
+
+    # Create the GeoDataFrame
+    routes_gdf = gpd.GeoDataFrame({
+        "route_id": route_ids,
+        "geometry": polylines,
+        "closest_depot": closest_depots,
+        "route_cells": route_cells_list
+    }, crs=macro_routes_gdf.crs)
+    
+    return routes_gdf
+
+micro_routes_gdf = create_micro_routes_gdf(results, macro_routes_gdf, depot_point)
+print(micro_routes_gdf)
 
 
 # +
@@ -1116,7 +1182,7 @@ draw_control.cut = False
 draw_control.drag = False
 m3.add(draw_control)
 
-m3.add(FullScreenControl(position='topleft'))
+# m3.add(FullScreenControl(position='topleft'))
 m3.add(LayersControl(position='topright', collapsed=False))
 m3.add(ScaleControl(position='bottomleft'))
 m3
@@ -1132,3 +1198,179 @@ print(m3.zoom)
 #
 # - Show cells associated with each depot
 # - Show routes to cover all cells from each depot
+
+# +
+# micro_routes_gdf
+
+# +
+from ipyleaflet import Map, Polyline, LayerGroup, basemaps
+from ipywidgets import HTML
+import geopandas as gpd
+
+def plot_routes_on_map(micro_routes_gdf):
+    """
+    Plot a GeoDataFrame of polylines on an ipyleaflet map.
+
+    Parameters:
+    - micro_routes_gdf: GeoDataFrame
+        GeoDataFrame containing route polylines with columns for 'route_id' and 'geometry'.
+
+    
+    Returns:
+    - m: ipyleaflet.Map
+        Interactive ipyleaflet map with plotted routes.
+    """
+    
+    # Create a layer group to hold all the route polylines
+    route_layer_group = LayerGroup(name="Micro routes")
+    
+    for _, row in micro_routes_gdf.iterrows():
+        route_id = row['route_id']
+        # coords = [(point.y, point.x) for point in row['geometry'].coords]
+        coords = [(lat, lon) for lon, lat in row['geometry'].coords]
+        
+        # Create a Polyline for the route
+        polyline = Polyline(
+            locations=coords,
+            color="blue",
+            fill=True,
+            weight=4,
+            opacity=0.7,
+            name=route_id
+        )
+        
+        # Add a tooltip with the route_id
+        # polyline.popup = HTML(f"<b>Route ID:</b> {route_id}")
+        route_layer_group.add(polyline)
+    
+    return route_layer_group
+
+
+
+# +
+from ipyleaflet import Choropleth, GeoJSON, WidgetControl, FullScreenControl, GeomanDrawControl
+from ipywidgets import Select, Dropdown
+import matplotlib as plt
+from shapely.geometry import mapping, shape
+import json
+import time
+
+# Load Data for mapping
+# =====================
+
+# Load the GeoJSON region outline
+with open(region_contour_geojson, "r") as f:
+    region_contour_data = json.load(f)
+region_geometry = shape(region_contour_data['features'][0]['geometry'])
+region_center = region_geometry.centroid
+
+# Load Voronoi cells
+with open(voronoi_partition_filename, "r") as f:
+    voronoi_data = json.load(f)
+
+# Load depot locations
+with open(depots_filename, "r") as f:
+    depot_data = json.load(f)
+
+
+all_depot_layers = depot_selection_layers(depot_data, voronoi_data) # Dict of layer instances
+list_depots = list(all_depot_layers.keys())
+
+# Depot select widget
+depot_select = Dropdown(
+    options=list_depots,
+    value=list_depots[0],
+    description='Depot:',
+    disabled=False
+)
+
+def on_depot_select(change):
+    # Change depot display layers
+    old_layer = all_depot_layers[change['old']]
+    new_layer = all_depot_layers[change['new']]
+    m4.substitute(old_layer, new_layer)
+
+depot_select.observe(on_depot_select, names='value')
+
+
+
+# Set up interactive map
+# ======================
+m4 = Map(center=(region_center.y, region_center.x), 
+         zoom=16, zoom_snap=0.25, zoom_delta=0.25, scroll_wheel_zoom=True
+)
+
+# Add the region border to the map
+region_layer = GeoJSON(
+    data=region_contour_data, 
+    style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+    name=region_contour_data['name'])
+# region_layer.pmIgnore = True  # Lock this layer
+m4.add(region_layer)
+
+# Add Voronoi polygons
+voronoi_layer = GeoJSON(
+    data=voronoi_data, 
+    style={'color': 'blue', 'fillColor': 'lightblue', 'opacity': 0.25, 'weight': 1},
+    name=voronoi_data['name'])
+voronoi_layer.pmIgnore = True  # Lock this layer
+m4.add(voronoi_layer)
+
+# Always keep depot points visible
+depot_points = GeoJSON(
+    data=depot_data,
+    style={'color': 'black', 'radius':3, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
+    hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+    point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+    name=depot_data['name']
+)
+m4.add(depot_points)
+
+# Add depot selection dropdown widget
+depot_select_control = WidgetControl(widget=depot_select, position='bottomright')
+m4.add(depot_select_control)
+
+# Add (interactive + dynamic) depot layer
+depot_layer = all_depot_layers[depot_select.value] # Whichever is initially set
+m4.add(depot_layer)
+
+
+reprojected_route = micro_routes_gdf.to_crs(visualization_crs)
+row = reprojected_route.loc[0]
+route_id = row['route_id']
+coords = [(lat, lon) for lon, lat in row['geometry'].coords]
+
+# Create a Polyline for the route
+polyline = Polyline(
+    locations=coords,
+    color="blue",
+    fill=False,
+    weight=4,
+    opacity=0.7,
+    name=route_id
+)
+m4.add(polyline)
+
+# routes_layer = plot_routes_on_map(micro_routes_gdf)
+# m4.add(routes_layer)
+
+draw_control = GeomanDrawControl()
+draw_control.circlemarker = {}
+draw_control.rotate = False
+draw_control.cut = False
+draw_control.drag = False
+m4.add(draw_control)
+
+m4.add(FullScreenControl(position='topleft'))
+m4.add(LayersControl(position='topright', collapsed=False))
+m4.add(ScaleControl(position='bottomleft'))
+m4
+
+# +
+row = micro_routes_gdf.loc[0]
+route_id = row['route_id']
+# coords = [(point.y, point.x) for point in row['geometry'].coords]
+coords = [(lat, lon) for lon, lat in row['geometry'].coords]
+print(coords)
+
+

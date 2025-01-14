@@ -25,6 +25,11 @@ jupyter:
 ---
 
 ```python
+# For website deployed environment
+%pip install -q ipywidgets
+```
+
+```python
 # Load required libraries
 import numpy as np
 import cv2
@@ -62,11 +67,20 @@ from plant_search.load_image import load_image, plot_image
 
 # file_path = 'input/ESPG-4326-orthophoto.tif'
 # file_path = 'input/MADRID_RGB.tif'
-file_path = '../input/aerial-trees.jpg'
+# file_path = '../input/aerial-trees.jpg'
+
+# file_path = '../input/DJI_0010.JPG'
+# file_path = '../input/DJI_0015.JPG'
+file_path = '../input/DJI_0093.JPG'
+# file_path = '../input/DJI_0119.JPG'
+# file_path = '../input/Brewster-ortho.tif'
+
+ds = 4 # downscale ratio
 
 image = load_image(file_path)
 if image is not None:
     plot_image(image, "Original Image")
+    image = image[::ds, ::ds]
 
 ```
 
@@ -250,12 +264,8 @@ def refine_mask(mask, kernel_size=5, min_size=50):
 ```
 
 ```python
-
-```
-
-```python
 # Apply the threshold to get the initial mask
-threshold = 0.45  # Adjust as needed
+threshold = 0.64  # Adjust as needed
 green_mask = A_normalized > threshold
 
 # Refine the mask
