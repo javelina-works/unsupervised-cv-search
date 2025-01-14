@@ -186,3 +186,38 @@ def routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes):
         "route_cells": route_cells
     }, crs=station_cells_gdf.crs)
     return routes_gdf
+
+
+def create_macro_routes():
+    """
+    Assuming that we have determined our depot placements, we now  begin routing.
+    
+    - ? What are the inputs here? What is needed to plan each macro route?
+        - GDF of depot placements
+        - GDF of cells
+        - GDF of targets
+    - Assignment to a closest depot:
+        - Cells
+        - Targets within said cells (should not have a closest depot?)
+            - How might we best normalize targets_gdf?
+            - Do we want targets associated with a depot or a cell?
+            - Different GDFs for targets with closest_depot, etc?
+
+    
+    
+    - ? Assigning cells to each depot?
+    - 
+
+
+    Args:
+        routing (RoutingModel): The OR-Tools RoutingModel.
+        manager (RoutingIndexManager): The OR-Tools RoutingIndexManager.
+        core_data (dict): A dictionary containing the data needed for core distance constraint solving
+
+    Returns:
+        Dimension: The configured distance dimension.
+    """
+
+
+    return
+

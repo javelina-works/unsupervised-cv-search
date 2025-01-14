@@ -152,14 +152,11 @@ cell_gdf = centroidal_voronoi_tessellation(simplified_polygon, num_cells, max_it
 
 # Find depots to cover all cells
 depots_gdf = find_depots(depot_radius, cell_gdf, region_outline_gdf, grid_density)
-depots_gdf, cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf) # Updates both GDFs in place
+depots_gdf, cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf) # No update GDFs in place
 
 # for depot_id, depot in updated_cell_gdf.iterrows():
 #     print(f'{depot_id}: {depot["closest_depot"]}')
 # -
-
-# depots_gdf.crs
-cell_gdf.crs
 
 # ### Find Targets
 #
@@ -183,6 +180,7 @@ cell_gdf.crs
 # +
 from plant_search.image_preprocess import correct_binary_mask, identify_targets
 from plant_search.load_image import load_image
+from plant_search.macro_planning import calculate_cell_workloads, targets_to_depots
 import rasterio
 
 # Approach 3: from full-sized orthophoto
@@ -194,16 +192,12 @@ with rasterio.open(binary_mask_path) as src:
 full_binary_mask = correct_binary_mask(binary_mask, image.shape)
 targets_gdf = identify_targets(full_binary_mask, transform)
 
-# # del full_binary_mask # Gimme back my RAM
-# print(f"Binary mask dimensions: {binary_mask.shape}")
-# print(f"Number of targets (detected plants): {len(targets_gdf)}")
-
-# +
-from plant_search.macro_planning import calculate_cell_workloads, targets_to_depots
-
 # Associate each target with a parent cell
 cell_gdf, targets_gdf = calculate_cell_workloads(cell_gdf, targets_gdf)
 targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w/ a depot
+# -
+
+targets_gdf
 
 # +
 from macro_planning.trip_routing import create_distance_matrix, solve_basic_vrp, routes_to_gdf
@@ -578,13 +572,79 @@ ax.set_ylabel("Latitude")
 ax.legend(loc='upper right', fontsize=10)
 plt.grid(True)
 plt.show()
+
+
 # -
 
 # #### Write Data to Files
 #
+#
+# ## GeoDataFrames Documentation
+#
+# 1. `cells_gdf`
+#
+# **Description:**  
+# This GeoDataFrame represents a tessellation of the region, typically Voronoi cells or other partitioning polygons.
+#
+# **Columns:**
+# - `geometry`: Polygon defining the spatial extent of each cell.
+# - `cell_centroid`: Centroid of the cell polygon.
+# - `cell_id`: Unique identifier for each cell.
+# - `target_count`: Number of target points within the cell (calculated via spatial join).
+# - `intra_workload`: Sum of Minimum Spanning Tree (MST) distances for targets within the cell (intra-cell workload).
+#
+#
+# 2. `targets_gdf`
+#
+# **Description:**  
+# This GeoDataFrame contains the spatial points representing the targets to be served or analyzed within the region.
+#
+# **Columns:**
+# - `geometry`: Point geometry of each target.
+# - `parent_cell_id`: The ID of the cell that contains this target, assigned via spatial join.
+#
+#
+#
+# 3. `voronoi_gdf`
+#
+# **Description:**  
+# This GeoDataFrame stores the Voronoi polygons clipped to the boundaries of a specified region.
+#
+# **Columns:**
+# - `geometry`: Polygon geometry of each Voronoi cell.
+#
+#
+#
+# 4. `points_gdf`
+#
+# **Description:**  
+# This GeoDataFrame stores the seed points used for generating Voronoi polygons.
+#
+# **Columns:**
+# - `geometry`: Point geometry representing each seed point.
+#
+# ---
+#
+#
+#
 # 1. Region cells
 # 2.  Region cell centroids
 # 3. Depot locations
+
+# +
+def print_gdf_info(gdf, name):
+    print(f"GeoDataFrame: {name}")
+    print("Columns and Types:")
+    print(gdf.dtypes)
+    print("-" * 40)
+
+# Example usage
+print_gdf_info(region_outline_gdf, "region_outline_gdf")
+print_gdf_info(cell_gdf, "cells_gdf")
+print_gdf_info(targets_gdf, "targets_gdf")
+print_gdf_info(depots_gdf, "depots_gdf")
+print_gdf_info(macro_routes_gdf, "macro_routes_gdf")
+print_gdf_info(micro_routes_gdf, "micro_routes_gdf")
 
 # +
 cell_gdf_4326 = cell_gdf.copy().to_crs(visualization_crs)
@@ -1352,7 +1412,7 @@ polyline = Polyline(
 m4.add(polyline)
 
 # routes_layer = plot_routes_on_map(micro_routes_gdf)
-# m4.add(routes_layer)
+# m4.add(routes_layer)   
 
 draw_control = GeomanDrawControl()
 draw_control.circlemarker = {}

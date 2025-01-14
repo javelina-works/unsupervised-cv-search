@@ -1,0 +1,50 @@
+GeoDataFrame: region_outline_gdf
+Columns and Types:
+FID            int64
+geometry    geometry
+dtype: object
+----------------------------------------
+GeoDataFrame: cells_gdf
+Columns and Types:
+geometry             geometry
+cell_centroid        geometry
+cell_id                 int64
+associated_depots      object
+closest_depot          object
+target_count            int64
+intra_workload        float64
+dtype: object
+----------------------------------------
+GeoDataFrame: targets_gdf
+Columns and Types:
+geometry          geometry
+bounding_box        object
+parent_cell_id     float64
+closest_depot       object
+route_id            object
+dtype: object
+----------------------------------------
+GeoDataFrame: depots_gdf
+Columns and Types:
+geometry             geometry
+depot_radius            int64
+depot_id               object
+min_enclosing_rad     float64
+dtype: object
+----------------------------------------
+GeoDataFrame: macro_routes_gdf
+Columns and Types:
+geometry       geometry
+route_id         object
+route_depot      object
+route_cells      object
+dtype: object
+----------------------------------------
+GeoDataFrame: micro_routes_gdf
+Columns and Types:
+route_id           object
+geometry         geometry
+closest_depot      object
+route_cells        object
+dtype: object
+----------------------------------------
