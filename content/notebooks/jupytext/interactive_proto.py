@@ -256,15 +256,14 @@ depots_gdf = find_depots(depot_radius, cells_gdf, region_outline_gdf, grid_densi
 # **Outputs**:
 # - `cells_depots_df`: Associates each cell of our region with a serving depot
 # - `cell_targets_df`: Associate each cell with corresponsing targets
-#
-# - `targets_routing_df`: Associates each target with a parent cell, closest depot, route_id
 # - `cells_workloads_df`: Relative amount of work to treat all targets in a cell
 
 # +
-from macro_planning.depot_placement import create_cells_depots_df
 from macro_planning.trip_routing import assign_targets_to_routes
 from macro_planning.junctions import (
-    targets_cells_df
+    create_cells_depots_df,
+    create_cell_targets_df,
+    create_cell_workloads_df
 )
 
 # TODO: add timestamp for association to cells_depots_df
@@ -274,27 +273,28 @@ cells_depots_df = create_cells_depots_df(depots_gdf, cells_gdf)
 # Replaces:
 # depots_gdf, cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf) # No update GDFs in place
 
-cell_targets_df = targets_cells_df(targets_gdf, cells_gdf)
+# Associate each cell with targets it contains
+cell_targets_df = create_cell_targets_df(cells_gdf, targets_gdf)
+# Replaces:
+# targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w/ a depot
+
+# Approximate total amount of work to be done in each cell
+cell_workloads_df  = create_cell_workloads_df(cells_gdf, targets_gdf, cell_targets_df)
+# Replaces:
+# cell_gdf, targets_gdf = calculate_cell_workloads(cells_gdf, targets_gdf)
 
 
 # cells_depots_df
-# -
-
 # cell_targets_df
-targets_gdf
-
-# +
-from plant_search.macro_planning import calculate_cell_workloads, targets_to_depots
-
-# Associate each target with a parent cell
-cell_gdf, targets_gdf = calculate_cell_workloads(cell_gdf, targets_gdf)
-# targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w/ a depot
-
-# +
-# targets_gdf
 # -
 
-# ### Macro Route Planning
+# ### 5. Macro Route Planning
+#
+# With our depots and cells (now with "workload"), we can begin planning a rough outline of trips to be taken. 
+#
+# This first "macro" run actually ignores targets, and instead only plans routes through cell centroids. We have done this intentionally, as it simplifies our problem (and reduces dimensions of the distance matrix), while still offering a reasonable approximation.
+#
+# Once our cell-level macro routes are planned, we can then find optimal routes at a target level.
 
 # +
 from macro_planning.trip_routing import create_distance_matrix, solve_basic_vrp, routes_to_gdf

@@ -99,6 +99,6 @@ def identify_targets(binary_mask, transform, region_crs="EPSG:32613"):
         features.append({"geometry": centroid_point, "bounding_box": bounding_box})
 
     # Step 4: Create GeoDataFrame
-    gdf = gpd.GeoDataFrame(features, crs=region_crs)
+    targets_gdf = gpd.GeoDataFrame(features, crs=region_crs)
 
-    return gdf
+    return targets_gdf

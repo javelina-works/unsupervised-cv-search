@@ -123,60 +123,6 @@ def assign_cells_to_depot(depots_gdf, cell_gdf):
     return depots_gdf, cell_gdf
 
 
-
-def create_cells_depots_df(depots_gdf, cells_gdf, target_crs="EPSG:32613"):
-    """
-    Associates cells with depots, computing the closest depot and associated depots.
-    Ensures CRS is in meters for accurate distance calculations.
-    
-    Parameters:
-        depots_gdf (GeoDataFrame): Depots with geometry and radius.
-        cells_gdf (GeoDataFrame): Cells with geometry.
-        target_crs (str): Target CRS (e.g., "EPSG:32614") for distance calculations.
-    
-    Returns:
-        cells_depots_df: DataFrame containing cell-depot associations with distances.
-    """
-
-    # Copy and reproject GeoDataFrames to the target CRS
-    depots_proj = depots_gdf.to_crs(target_crs)
-    cells_proj = cells_gdf.to_crs(target_crs)
-
-    records = [] # Initialize list to store results
-
-    # Iterate through each cell to compute associations
-    for _, cell in cells_proj.iterrows():
-
-        # Filter depots where the cell is fully within the depot's range radius
-        associated_depots = [
-            depot["depot_id"]
-            for _, depot in depots_proj.iterrows()
-            if cell.geometry.within(depot["geometry"].buffer(depot.get("depot_radius", 0)))
-        ]
-        
-        # Compute distances to associated depots and find the closest one
-        if associated_depots:
-            distances = {
-                depot["depot_id"]: cell.geometry.centroid.distance(depot["geometry"])
-                for _, depot in depots_proj[depots_proj["depot_id"].isin(associated_depots)].iterrows()
-            }
-            closest_depot = min(distances, key=distances.get)
-            closest_distance = distances[closest_depot]
-        else:
-            closest_depot = None
-            closest_distance = None
-
-        records.append({
-            "cell_id": cell["cell_id"],
-            "closest_depot": closest_depot,
-            "associated_depots": associated_depots,
-            "distance": closest_distance,
-        })
-
-    cells_depots_df = pd.DataFrame(records)
-    return cells_depots_df
-
-
 from scipy.spatial import ConvexHull
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
