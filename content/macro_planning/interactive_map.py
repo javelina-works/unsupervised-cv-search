@@ -83,7 +83,7 @@ def depot_selection_layers(depot_data, cell_data):
 
 
 
-def display_interactive_map(region_geojson, cells_geojson, depots_geojson):
+def display_interactive_map(region_geojson, cells_geojson, depots_geojson, **file_layers):
     # Load Data for mapping
     # =====================
 
@@ -163,6 +163,15 @@ def display_interactive_map(region_geojson, cells_geojson, depots_geojson):
     # Add (interactive + dynamic) depot layer
     depot_layer = all_depot_layers[depot_select.value] # Whichever is initially set
     m.add(depot_layer)
+
+    # Add all args layers passed
+    for layer_name, file_path in file_layers.items():
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        layer = GeoJSON(data=data, name=layer_name)
+        m.add_layer(layer)
+
+
 
     draw_control = GeomanDrawControl()
     draw_control.circlemarker = {}

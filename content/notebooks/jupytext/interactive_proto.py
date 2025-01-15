@@ -628,60 +628,11 @@ plt.show()
 
 # -
 
-# #### Write Data to Files
+# ## Write Data to Files
 #
+# We store all of our calculated values in the GIS-standard GeoJSON format. 
 #
-# ## GeoDataFrames Documentation
-#
-# 1. `cells_gdf`
-#
-# **Description:**  
-# This GeoDataFrame represents a tessellation of the region, typically Voronoi cells or other partitioning polygons.
-#
-# **Columns:**
-# - `geometry`: Polygon defining the spatial extent of each cell.
-# - `cell_centroid`: Centroid of the cell polygon.
-# - `cell_id`: Unique identifier for each cell.
-# - `target_count`: Number of target points within the cell (calculated via spatial join).
-# - `intra_workload`: Sum of Minimum Spanning Tree (MST) distances for targets within the cell (intra-cell workload).
-#
-#
-# 2. `targets_gdf`
-#
-# **Description:**  
-# This GeoDataFrame contains the spatial points representing the targets to be served or analyzed within the region.
-#
-# **Columns:**
-# - `geometry`: Point geometry of each target.
-# - `parent_cell_id`: The ID of the cell that contains this target, assigned via spatial join.
-#
-#
-#
-# 3. `voronoi_gdf`
-#
-# **Description:**  
-# This GeoDataFrame stores the Voronoi polygons clipped to the boundaries of a specified region.
-#
-# **Columns:**
-# - `geometry`: Polygon geometry of each Voronoi cell.
-#
-#
-#
-# 4. `points_gdf`
-#
-# **Description:**  
-# This GeoDataFrame stores the seed points used for generating Voronoi polygons.
-#
-# **Columns:**
-# - `geometry`: Point geometry representing each seed point.
-#
-# ---
-#
-#
-#
-# 1. Region cells
-# 2.  Region cell centroids
-# 3. Depot locations
+# This will allow us to easily display and transfer solution data in future applications, and port our results into common GIS tools.
 
 # +
 def print_gdf_info(gdf, name):
@@ -692,14 +643,14 @@ def print_gdf_info(gdf, name):
 
 # Example usage
 print_gdf_info(region_outline_gdf, "region_outline_gdf")
-print_gdf_info(cell_gdf, "cells_gdf")
+print_gdf_info(cells_gdf, "cells_gdf")
 print_gdf_info(targets_gdf, "targets_gdf")
 print_gdf_info(depots_gdf, "depots_gdf")
 print_gdf_info(macro_routes_gdf, "macro_routes_gdf")
-print_gdf_info(micro_routes_gdf, "micro_routes_gdf")
+# print_gdf_info(micro_routes_gdf, "micro_routes_gdf")
 
 # +
-cell_gdf_4326 = cell_gdf.copy().to_crs(visualization_crs)
+cell_gdf_4326 = cells_gdf.copy().to_crs(visualization_crs)
 # print(cell_gdf_4326.crs)
 
 # Create a copy with only the 'geometry' column (Voronoi polygons)
@@ -728,120 +679,9 @@ macro_routes_gdf.to_crs(visualization_crs, inplace=True)
 macro_routes_gdf.to_file(macro_routes_filename, driver="GeoJSON")
 # -
 
-# #### Data Interaction with Leaflet
-
-# +
-from ipyleaflet import Circle, CircleMarker, LayerGroup
-
-def create_depot_layers(depot_data):
-    depot_layers = []
-
-    for feature in depot_data["features"]:
-        depot_plots = [] # Hold range, centerpoint circles
-        coords = feature["geometry"]["coordinates"]
-        properties = feature["properties"]
-        depot_radius = properties.get("depot_radius", 0)  # Default to 0 if missing
-        depot_id = properties.get("depot_id", "Unknown ID")
-        depot_name = f'Depot {depot_id}'
-
-        range_circle = Circle(
-            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
-            radius=depot_radius,  # Circle radius in meters
-            color='black', fill=False, fill_color='#3366cc',
-            fill_opacity=0.05, weight=1,
-            tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
-        )
-        
-        center_circle = CircleMarker(
-            location=[coords[1], coords[0]],  # GeoJSON uses (lon, lat), Folium expects (lat, lon)
-            radius=5,  # Circle radius in meters
-            color='black', fill=True, fill_color='red',
-            fill_opacity=0.9, weight=1,
-            tooltip=f"Depot ID: {depot_id}\nRadius: {depot_radius}m"
-        )
-
-        depot_layergroup = LayerGroup(
-            layers=(range_circle, center_circle),
-            name=depot_name
-        )
-        depot_layers.append(depot_layergroup)
-    
-    return depot_layers
-
-
-# +
-import geopandas as gpd
-from ipyleaflet import (
-    Map, GeoJSON, GeoData, Circle, LayerGroup,
-    LayersControl, ScaleControl
-)
-from shapely.geometry import mapping, shape
-import json
-
-# Load the GeoJSON region outline
-with open(region_contour_geojson, "r") as f:
-    region_contour_data = json.load(f)
-region_geometry = shape(region_contour_data['features'][0]['geometry'])
-region_center = region_geometry.centroid
-
-# Load Voronoi polygons
-with open(voronoi_partition_filename, "r") as f:
-    voronoi_data = json.load(f)
-
-# Load centroids
-with open(voronoi_centroids_filename, "r") as f:
-    centroid_data = json.load(f)
-
-# Load depot locations
-with open(depots_filename, "r") as f:
-    depot_data = json.load(f)
-
-# print(region_contour_data)
-print(voronoi_data)
-# print(centroid_data)
-# print(depot_data)
-
-
-
-
-m = Map(center=(region_center.y, region_center.x), zoom=16)
-
-# Add the region border to the map
-region_layer = GeoJSON(
-    data=region_contour_data, 
-    style={'color': 'green', 'fillOpacity': 0.2, 'weight': 3},
-    name=region_contour_data['name'])
-m.add_layer(region_layer)
-
-# Add Voronoi polygons
-voronoi_layer = GeoJSON(
-    data=voronoi_data, 
-    style={'color': 'blue', 'fillColor': 'lightblue', 'opacity': 0.5, 'weight': 2},
-    name=voronoi_data['name'])
-m.add_layer(voronoi_layer)
-
-# Add centroids
-centroid_layer = GeoJSON(
-    data=centroid_data, 
-    style={'color': 'black', 'radius':3, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
-    hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
-    point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
-    name=centroid_data['name'])
-centroid_layer.visible = False  # Set layer to hidden
-m.add_layer(centroid_layer)
-
-# Plot depot circles
-depot_layers = create_depot_layers(depot_data)
-for depot_layer in depot_layers:
-    m.add(depot_layer)
-
-
-m.add_control(LayersControl(position='topright'))
-m.add(ScaleControl(position='bottomleft'))
-m # Display the map
-# -
-
-# ## Minimal Depot Interactions
+# ## Interactive Depot Map
+#
+# Select a depot using ipywidgets dropdown to see information relevant to the given depot.
 
 # +
 from macro_planning.interactive_map import display_interactive_map
@@ -849,7 +689,8 @@ from macro_planning.interactive_map import display_interactive_map
 interactive_map = display_interactive_map(
     region_contour_geojson,
     voronoi_partition_filename,
-    depots_filename
+    depots_filename,
+    macro_routes=macro_routes_filename
 )
 interactive_map
 # -
