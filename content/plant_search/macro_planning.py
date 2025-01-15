@@ -110,6 +110,7 @@ def targets_to_depots(cell_gdf, targets_gdf):
 
     return targets_gdf
 
+
 # Useful visualizations
 # ========================
 

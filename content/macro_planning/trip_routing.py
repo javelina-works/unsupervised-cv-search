@@ -202,6 +202,3 @@ def assign_targets_to_routes(targets_gdf, depots_gdf):
     
     return pd.DataFrame(assignments)
 
-
-
-

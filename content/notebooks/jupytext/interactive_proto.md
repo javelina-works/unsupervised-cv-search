@@ -34,31 +34,87 @@ Stages:
 4. Select & Execute Plans
 
 
-## Region Input & Sub-Division
+Possible Improvements:
+- Manually place depots: have it reflect efficiency of placements
+- What do we actually deliver to a client/NRCS to prove we did the routes?
+    - Maybe ask Cade what he would like to see
+- What would we need to change/update before handing this off to Cade?
+- Builds into flight-tracking platform?
+- How can we package this into something more user friendly?
+- TODO: close loop on route waypoint file generation
+- Is GPS accurate enough?
 
-- Get region outline
-- Divide into work cells
-- Tentative plan for depot locations
-- 
+
+## Data Calculation
+
+Here we will load in our "static" data and compute efficient treatment solutions.
+
+This section will cover the raw computation and coding end of things, while the next will allow us to visualize and interact with our solution space.
+
+```python tags=["parameters"]
+# General Parameters
+# ==================
+region_crs = 32613 # Use this everywhere for consistency
+visualization_crs = 4326 # Use this when we need leaflet visualizations
+
+# 1a. Work region
+region_image_path = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
+region_contour_shapefile = '../input/interactive_proto/region_contour.shp'
+region_contour_geojson = '../input/interactive_proto/region_contour.geojson'
+region_name = 'Brewster_57' # To associate cells, targets with region
+region_version = '2024-12-14'
+simplification_tolerance = 5
+
+# 1b. Cell generation parameters
+target_area_acres = 0.5
+# target_area_acres = 1.5
+# target_area_acres = 2.5
+target_area_sqm = target_area_acres * 4046.86
+max_iterations = 15 # Cycles to find improved partition
+voronoi_partition_filename = '../input/interactive_proto/voronoi_partition.geojson'
+voronoi_centroids_filename = '../input/interactive_proto/voronoi_centroids.geojson'
 
 
-### Dummy Region Shapefile
+# Depot placement parameters
+depot_radius = 225  # Max distance a depot can cover
+grid_density = 4
+depots_filename = '../input/interactive_proto/depot_points.geojson'
+
+
+# Target detection parameters
+binary_mask_path = "../outputs/region_binary_mask.tif"
+region_orthophoto_filename = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
+targets_plants_filename = '../input/interactive_proto/targets.geojson'
+
+# Macro route planning parameters
+t_max_distance = 850  # Max distance per trip (meters)
+t_distance_slack = 50
+t_distance_slack_penalty = 10_000
+t_slack_routes = 5
+t_num_vehicles = 25
+macro_routes_filename = '../input/interactive_proto/macro_routes.geojson'
+
+```
+
+### 1. Region Input & Cell Partitioning
+
+We will likely recieve a shaefile of the target region which we will be treating. Often, these will be large regions, so we will need to divide into smaller workable cells to track our progress.
+
+We can expect that the region will be the same over multiple treatment sessions, and so we treat the area and region partition as 'static'. In other words, we will avoid updating these tables/dataframes unless needed, and will instead rely on "junction tables" to relate to more ephemeral items, such as depots and routes.
+
+1.  Get region outline (from shapefile or generate our own)
+2.  Divide region into work cells (voronoi partition)
+
+**Outputs**:
+- `region_outline_gdf`: Where we are working
+- `cells_gdf`: Cells dividing our working region
+
+
+#### 1a. Dummy Region Shapefile
 
 At this point, we do not actually have a shapefile of the target region. The following two Jupyter cells will generate one using the outline of the orthophoto we have created. 
 
 Load this as the "shapefile" which will define our working region. 
-
-```python
-region_image_path = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
-region_contour_shapefile = '../input/interactive_proto/region_contour.shp'
-region_contour_geojson = '../input/interactive_proto/region_contour.geojson'
-
-
-region_crs = 32613 # Use this everywhere for consistency
-visualization_crs = 4326 # Use this when we need leaflet visualizations
-simplification_tolerance = 5
-
-```
 
 ```python
 import sys
@@ -95,115 +151,27 @@ print(f"Written geoJSON CRS: {loaded_gdf.crs}")
 print(type(loaded_gdf))
 <!-- #endraw -->
 
-### Create Voronoi Partitioning, Solve for Depots
+#### 1b. Create Voronoi Partitioning
 
-- [x] Display region outline
-- [x] Display region partition cells, centroids
-- [x] Find and indicate depot locations
-- [ ] Plan routes (pre-target adjustment CV) 
-
-
-Possible Improvements:
-- Manually place depots: have it reflect efficiency of placements
-- What do we actually deliver to a client/NRCS to prove we did the routes?
-    - Maybe ask Cade what he would like to see
-- What would we need to change/update before handing this off to Cade?
-- Builds into flight-tracking platform?
-- How can we package this into something more user friendly?
-- TODO: close loop on route waypoint file generation
-- Is GPS accurate enough?
-
-```python tags=["parameters"]
-# Cell generation parameters
-target_area_acres = 0.5
-# target_area_acres = 1.5
-# target_area_acres = 2.5
-
-target_area_sqm = target_area_acres * 4046.86
-max_iterations = 15 # Cycles to find improved partition
-voronoi_partition_filename = '../input/interactive_proto/voronoi_partition.geojson'
-voronoi_centroids_filename = '../input/interactive_proto/voronoi_centroids.geojson'
-
-# Depot placement parameters
-depot_radius = 225  # Max distance a depot can cover
-grid_density = 4
-depots_filename = '../input/interactive_proto/depot_points.geojson'
-
-
-# Target detection parameters
-binary_mask_path = "../outputs/region_binary_mask.tif"
-region_orthophoto_filename = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
-targets_plants_filename = '../input/interactive_proto/targets.geojson'
-
-# Macro route planning parameters
-t_max_distance = 850  # Max distance per trip (meters)
-t_distance_slack = 50
-t_distance_slack_penalty = 10_000
-t_slack_routes = 5
-t_num_vehicles = 25
-macro_routes_filename = '../input/interactive_proto/macro_routes.geojson'
-
-```
+Divide our working region into more manageable half-acre cells. 
 
 ```python
 from plant_search.region_partition import centroidal_voronoi_tessellation
-from macro_planning.depot_placement import find_depots, assign_cells_to_depot
 
+# Read in region outline from shape file
 region_outline_gdf = gpd.read_file(region_contour_shapefile)
+
+# Simplify geometry slightly, reduce overhead on computing voronoi tesselation
 simplified_polygon = region_outline_gdf.geometry.iloc[0]
 num_cells = int(simplified_polygon.area / target_area_sqm) # How many cells to generate
 
 # Divide region into voronoi cells
-cell_gdf = centroidal_voronoi_tessellation(simplified_polygon, num_cells, max_iterations)
-
-# Find depots to cover all cells
-depots_gdf = find_depots(depot_radius, cell_gdf, region_outline_gdf, grid_density)
-depots_gdf, cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf) # No update GDFs in place
-
-# for depot_id, depot in updated_cell_gdf.iterrows():
-#     print(f'{depot_id}: {depot["closest_depot"]}')
+cells_gdf = centroidal_voronoi_tessellation(simplified_polygon, num_cells, max_iterations)
 ```
 
-```python
-from macro_planning.depot_placement import create_cells_depots_df
-from macro_planning.trip_routing import assign_targets_to_routes
+### 2. Find Targets
 
-cells_depots_df = create_cells_depots_df(depots_gdf, cell_gdf)
-# cells_depots_df
-
-
-```
-
-<!-- #region -->
-## Data Generation & Calculation
-
-### Static Data
-What we will assume to be the same even across multiple visits or treatment sessions.
-- `region_outline_gdf`: Where we are working
-- `cells_gdf`: Cells dividing our working region
-- `targets_gdf`: Plants in the working area to be treated
-
-
----
-
-### Ephemeral Data
-Data which may be frequently re-calculated as needed based on the working environment and requirements.
-- `depots_gdf`: Depots across working region for launching/landing drones
-- 
-
-#### Relational Ephemeral Data
-Data which relates two or more of the above data structures to find useful results. We should assume that these will be frequently re-calculated.
-- `cells_depots_df`: Associates each cell of our region with a serving depot
-- `cells_workloads_df`: Relative amount of work to treat all targets in a cell
-- `targets_routing_df`: Associates each target with an enclosing parent cell
-- 
-
-
----
-
-<!-- #endregion -->
-
-### Find Targets
+We will also treat targets separately from other data types. This is one of our most important inputs/outputs to keep track of, and it will be vital to monitor our progress at detection and treatment.
 
 Testing multiple approaches:
 1. From full-sized orthophoto
@@ -226,7 +194,6 @@ print(f"Number of targets (detected plants): {len(targets_gdf)}")
 ```python
 from plant_search.image_preprocess import correct_binary_mask, identify_targets
 from plant_search.load_image import load_image
-from plant_search.macro_planning import calculate_cell_workloads, targets_to_depots
 import rasterio
 
 # Approach 3: from full-sized orthophoto
@@ -237,15 +204,109 @@ with rasterio.open(binary_mask_path) as src:
     
 full_binary_mask = correct_binary_mask(binary_mask, image.shape)
 targets_gdf = identify_targets(full_binary_mask, transform)
-
-# Associate each target with a parent cell
-cell_gdf, targets_gdf = calculate_cell_workloads(cell_gdf, targets_gdf)
-targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w/ a depot
 ```
 
 ```python
-targets_gdf.dtypes
+import geopandas as gpd
+import uuid
+
+def assign_target_metadata(targets_gdf, region_name, region_version):
+    """
+    Assigns a globally unique ID to each target in `targets_gdf` and associates an outline version.
+
+    Parameters:
+    - targets_gdf (GeoDataFrame): The GeoDataFrame containing target points.
+    - region_name (str): Name of region for which we have an outline.
+    - region_version (str): The outline version to associate with each target.
+
+    Returns:
+    - GeoDataFrame: Updated `targets_gdf` with unique IDs and version.
+    """
+    # Assign a globally unique ID to each target
+    targets_gdf["target_id"] = [str(uuid.uuid4()) for _ in range(len(targets_gdf))]
+
+    # Associate each target with the given outline version
+    targets_gdf["region_outline_version"] = region_version
+    targets_gdf["region_name"] = region_name
+
+
+    return targets_gdf
+
+targets_gdf = assign_target_metadata(targets_gdf, region_name, region_version)
 ```
+
+### 3. Find Efficient Depot Locations
+Generally, this code will help us to solve for efficient depot placements that:
+1. Cover all of the work region's cells
+2. Use the fewest depots necessary
+
+```python
+from macro_planning.depot_placement import find_depots
+
+# Find depots to cover all cells
+depots_gdf = find_depots(depot_radius, cells_gdf, region_outline_gdf, grid_density)
+```
+
+<!-- #region -->
+### 4. Associate Cells, Depots, and Targets
+
+We have now 4 sets of data which we want to keep normalized. In the next steps, we will want to compute the most effective way to address every target in our work region using macro/micro route planning techniques. To do so, we will need to create some "junction tables".
+
+The junction tables relate two or more of the input data structures to find useful results. We should assume that these will be frequently re-calculated.
+
+**Inputs:**
+- `region_outline_gdf`: Where we are working
+- `cells_gdf`: Cells dividing our working region
+- `targets_gdf`: Plants in the working area to be treated
+- `depots_gdf`: Depots across working region for launching/landing drones
+
+
+**Outputs**:
+- `cells_depots_df`: Associates each cell of our region with a serving depot
+- `cell_targets_df`: Associate each cell with corresponsing targets
+
+- `targets_routing_df`: Associates each target with a parent cell, closest depot, route_id
+- `cells_workloads_df`: Relative amount of work to treat all targets in a cell
+<!-- #endregion -->
+
+```python
+from macro_planning.depot_placement import create_cells_depots_df
+from macro_planning.trip_routing import assign_targets_to_routes
+from macro_planning.junctions import (
+    targets_cells_df
+)
+
+# TODO: add timestamp for association to cells_depots_df
+
+# Find all depots able to serve each cell. Make note of closest "home" depot. 
+cells_depots_df = create_cells_depots_df(depots_gdf, cells_gdf)
+# Replaces:
+# depots_gdf, cell_gdf = assign_cells_to_depot(depots_gdf, cell_gdf) # No update GDFs in place
+
+cell_targets_df = targets_cells_df(targets_gdf, cells_gdf)
+
+
+# cells_depots_df
+```
+
+```python
+# cell_targets_df
+targets_gdf
+```
+
+```python
+from plant_search.macro_planning import calculate_cell_workloads, targets_to_depots
+
+# Associate each target with a parent cell
+cell_gdf, targets_gdf = calculate_cell_workloads(cell_gdf, targets_gdf)
+# targets_gdf = targets_to_depots(cell_gdf, targets_gdf) # Associate each target w/ a depot
+```
+
+```python
+# targets_gdf
+```
+
+### Macro Route Planning
 
 ```python
 from macro_planning.trip_routing import create_distance_matrix, solve_basic_vrp, routes_to_gdf
