@@ -240,7 +240,15 @@ from macro_planning.depot_placement import find_depots
 depots_gdf = find_depots(depot_radius, cells_gdf, region_outline_gdf, grid_density)
 # -
 
-# ### 4. Associate Cells, Depots, and Targets
+# ### 4. Macro Route Planning
+#
+# With our depots and cells (now with "workload"), we can begin planning a rough outline of trips to be taken. 
+#
+# This first "macro" run actually ignores targets, and instead only plans routes through cell centroids. We have done this intentionally, as it simplifies our problem (and reduces dimensions of the distance matrix), while still offering a reasonable approximation.
+#
+# Once our cell-level macro routes are planned, we can then find optimal routes at a target level.
+
+# #### 4a. Associate Cells, Depots, and Targets
 #
 # We have now 4 sets of data which we want to keep normalized. In the next steps, we will want to compute the most effective way to address every target in our work region using macro/micro route planning techniques. To do so, we will need to create some "junction tables".
 #
@@ -259,7 +267,6 @@ depots_gdf = find_depots(depot_radius, cells_gdf, region_outline_gdf, grid_densi
 # - `cells_workloads_df`: Relative amount of work to treat all targets in a cell
 
 # +
-from macro_planning.trip_routing import assign_targets_to_routes
 from macro_planning.junctions import (
     create_cells_depots_df,
     create_cell_targets_df,
@@ -284,71 +291,26 @@ cell_workloads_df  = create_cell_workloads_df(cells_gdf, targets_gdf, cell_targe
 # cell_gdf, targets_gdf = calculate_cell_workloads(cells_gdf, targets_gdf)
 
 
-# cells_depots_df
-# cell_targets_df
 # -
 
-# ### 5. Macro Route Planning
-#
-# With our depots and cells (now with "workload"), we can begin planning a rough outline of trips to be taken. 
-#
-# This first "macro" run actually ignores targets, and instead only plans routes through cell centroids. We have done this intentionally, as it simplifies our problem (and reduces dimensions of the distance matrix), while still offering a reasonable approximation.
-#
-# Once our cell-level macro routes are planned, we can then find optimal routes at a target level.
+# #### 4b. Compute Macro Routes
+# Find efficient routes to visit every cell in each depot's jurisdiction in the fewest total trips.
 
 # +
-from macro_planning.trip_routing import create_distance_matrix, solve_basic_vrp, routes_to_gdf
-from macro_planning.visualize_routing import plot_vrp_solution
-from pandas import concat
-
-macro_routes_gdf_list = []
-
-for depot_index in range(len(depots_gdf)):
-    base_station_gdf = depots_gdf.iloc[[depot_index]]
-    base_station_id = base_station_gdf.iloc[0]["depot_id"]
-    station_cells_gdf = cell_gdf[cell_gdf["closest_depot"] == base_station_id].copy()
-    
-    compensate_for_targets = True
-    t_distance_matrix = create_distance_matrix(station_cells_gdf, base_station_gdf, compensate_for_targets) # excluding intra-workload cost
-    t_num_cells = len(t_distance_matrix)-1 # Number of stops
-
-    target_data = {
-        "core": {
-            "distance_matrix": t_distance_matrix,
-            "num_vehicles": t_num_vehicles,
-            "depot_index": t_num_cells,
-            "max_distance": t_max_distance,
-            "distance_slack": t_distance_slack,
-            "distance_slack_penalty": t_distance_slack_penalty,
-            "slack_routes": t_slack_routes
-        }
-    }
-
-    print_routes = False # Set to True to see individual route statistics
-    target_routes = solve_basic_vrp(target_data, print_routes)
+from macro_planning.trip_routing import solve_macro_routes, initialize_target_data
 
 
+target_data = initialize_target_data(t_num_vehicles, t_max_distance, t_distance_slack, 
+                                     t_distance_slack_penalty, t_slack_routes)
 
-    if target_routes and isinstance(target_routes, list):
-        # t_title = "Workload-Compensated Routes"
-        # plot_vrp_solution(station_cells_gdf, t_distance_matrix, simplified_polygon, base_station_gdf, target_routes, t_title)
-        depot_macro_routes_gdf = routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes)
-        macro_routes_gdf_list.append(depot_macro_routes_gdf)
-    else:
-        print("No solution found.")
-
-macro_routes_gdf = gpd.GeoDataFrame(concat(macro_routes_gdf_list, ignore_index=True), crs=region_crs)
-
-# print(macro_routes_gdf_list)
-# macro_routes_gdf
-# print(macro_routes_gdf.keys())
-# print(len(target_routes))
-# for route in target_routes:
-#     print(route)
-
+macro_routes_gdf = solve_macro_routes(cells_gdf, depots_gdf, targets_gdf, target_data)
 # -
 
+# ### 5. Micro Route Solving
+
 macro_routes_gdf
+
+# ## Display Associated Targets
 
 # +
 import geopandas as gpd
@@ -393,7 +355,7 @@ def plot_targets_by_route(targets_gdf, depot_id):
     # Set up the plot
     fig, ax = plt.subplots(figsize=(10, 8))
     region_outline_gdf.boundary.plot(ax=ax, color="blue", linestyle="--", label="Simplified Region Outline")
-    cell_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
+    cells_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
     # base_station_gdf.plot(ax=ax, color='red', markersize=80, marker='*', zorder=10, label='Base Station')
     
     # Plot targets for each route_id in a different color
@@ -550,7 +512,7 @@ def plot_routes(results, depot_point, macro_routes_gdf):
     # Set up the plot
     fig, ax = plt.subplots(figsize=(12, 10))
     region_outline_gdf.boundary.plot(ax=ax, color="blue", linestyle="--", label="Simplified Region Outline")
-    cell_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
+    cells_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
     
     # Plot each route with a unique color
     for route_id, data in results.items():

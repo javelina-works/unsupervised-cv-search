@@ -3,8 +3,24 @@ import math
 from shapely.geometry import LineString
 import geopandas as gpd
 import pandas as pd
+from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+from pandas import concat
 
-def create_distance_matrix(cell_gdf, base_station_gdf, workload_compensated=False):
+
+# from visualize_routing import print_vehicle_details
+from macro_planning.visualize_routing import print_vehicle_details, plot_vrp_solution
+from macro_planning.junctions import (
+    create_cells_depots_df, 
+    create_cell_workloads_df
+)
+
+
+def create_distance_matrix(cell_gdf, base_station_gdf, cell_workloads_df=None):
+
+    # If we pass `cell_workloads_df`, we want to compensate for workload
+    workload_compensated = (cell_workloads_df is None)
+
+
     num_cells = len(cell_gdf)
 
     # Create a distance matrix (excluding intra-workload cost)
@@ -21,14 +37,18 @@ def create_distance_matrix(cell_gdf, base_station_gdf, workload_compensated=Fals
 
             dist = row_i.cell_centroid.distance(row_j.cell_centroid)
             if workload_compensated:
-                dist += row_j.intra_workload
+                workload_df = cell_workloads_df[cell_workloads_df['cell_id'] == row_j.cell_id]
+                dist += workload_df['workload'].iloc[0]
+                # dist += row_j.intra_workload
             distance_matrix[i][j] = dist
 
     # Add depot distances
     for i, row in enumerate(cell_gdf.itertuples()):
         dist_to_depot = depot_geometry.distance(row.cell_centroid)
         if workload_compensated:
-            dist_to_depot += row.intra_workload
+            workload_df = cell_workloads_df[cell_workloads_df['cell_id'] == row.cell_id]
+            dist_to_depot += workload_df['workload'].iloc[0]
+            # dist_to_depot += row.intra_workload
 
         distance_matrix[i, depot_index] = dist_to_depot  # To depot
         distance_matrix[depot_index, i] = dist_to_depot  # From depot
@@ -41,10 +61,7 @@ def create_distance_matrix(cell_gdf, base_station_gdf, workload_compensated=Fals
 
 # Routing Solvers
 # ================
-from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
-# from visualize_routing import print_vehicle_details
-from macro_planning.visualize_routing import print_vehicle_details
 
 def setup_distance_dimension(routing, manager, core_data):
     """
@@ -201,4 +218,99 @@ def assign_targets_to_routes(targets_gdf, depots_gdf):
         })
     
     return pd.DataFrame(assignments)
+
+
+# User Interface Functions
+# This is what the users actually want
+# ======================================
+
+
+def initialize_target_data(num_vehicles, max_distance, distance_slack, 
+                           distance_slack_penalty, slack_routes):
+    """
+    Initializes the target_data dictionary with core VRP parameters.
+
+    Parameters:
+    - distance_matrix: 2D array-like
+        The distance matrix for the VRP.
+    - num_vehicles: int
+        Number of vehicles available.
+    - depot_index: int
+        Index of the depot in the distance matrix.
+    - max_distance: float
+        Maximum allowable distance for any route (default: None, meaning no limit).
+    - distance_slack: float
+        Distance slack allowed for routes (default: 0).
+    - distance_slack_penalty: float
+        Penalty for exceeding the slack distance (default: 0).
+    - slack_routes: int
+        Number of slack routes (default: 0).
+
+    Returns:
+    - dict: Initialized target_data dictionary.
+    """
+
+    target_data = {
+        "core": {
+            # "distance_matrix": distance_matrix, # Set in solve_macro_routes()
+            # "depot_index": depot_index, # Set in solve_macro_routes()
+            "num_vehicles": num_vehicles,
+            "max_distance": max_distance,
+            "distance_slack": distance_slack,
+            "distance_slack_penalty": distance_slack_penalty,
+            "slack_routes": slack_routes,
+        }
+    }
+    return target_data
+
+
+def solve_macro_routes(cells_gdf, depots_gdf, targets_gdf, target_data,
+                       region_crs="EPSG:32613", print_routes=False):
+    """
+    Solves macro-level routes for depots and associated cells.
+
+    Parameters:
+    - cells_gdf: GeoDataFrame of cells.
+    - depots_gdf: GeoDataFrame of depots.
+    - targets_gdf: GeoDataFrame of targets.
+    - target_data: dictionary with core VRP parameters
+    - region_crs: CRS for the output GeoDataFrame.
+    - print_routes: Whether to print route statistics.
+
+    Returns:
+    - GeoDataFrame of macro routes.
+    """
+    # Precompute necessary data
+    cells_depots_df = create_cells_depots_df(depots_gdf, cells_gdf)
+    cell_workloads_df  = create_cell_workloads_df(cells_gdf, targets_gdf) # Not passing cell_targets_df, will re-compute
+    macro_routes_gdf_list = []
+
+    # Calculating all routes for each depot
+    for depot_index, depot in depots_gdf.iterrows():
+        base_station_id = depot["depot_id"]
+
+        # Filter cells associated with the current depot
+        station_cell_ids = cells_depots_df.loc[cells_depots_df["closest_depot"] == base_station_id, "cell_id"].tolist()
+        station_cells_gdf = cells_gdf[cells_gdf["cell_id"].isin(station_cell_ids)].copy()
+        base_station_gdf = depots_gdf.loc[[depot_index]]
+
+        # Set up VRP core parameters
+        t_distance_matrix = create_distance_matrix(station_cells_gdf, base_station_gdf, cell_workloads_df) # including intra-workload cost
+        t_num_cells = len(t_distance_matrix)-1 # Number of stops
+        target_data['core']['distance_matrix'] = t_distance_matrix
+        target_data['core']['depot_index'] = t_num_cells
+
+        target_routes = solve_basic_vrp(target_data, print_routes)
+
+
+        if target_routes and isinstance(target_routes, list):
+            depot_macro_routes_gdf = routes_to_gdf(station_cells_gdf, base_station_gdf, target_routes)
+            macro_routes_gdf_list.append(depot_macro_routes_gdf)
+        else:
+            print("No solution found.")
+
+    # Concatenate and return all macro routes as a GeoDataFrame
+    macro_routes_gdf = gpd.GeoDataFrame(concat(macro_routes_gdf_list, ignore_index=True), crs=region_crs)
+    return macro_routes_gdf
+
 
