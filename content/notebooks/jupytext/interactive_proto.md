@@ -387,6 +387,51 @@ print_gdf_info(micro_routes_gdf, "micro_routes_gdf")
 <!-- #endraw -->
 
 ```python
+# TODO: remove this function
+# Only using this for the demo
+
+
+def add_closest_depot_to_cells(cells_gdf, cells_depots_df):
+    """
+    Add a 'closest_depot' column to cells_gdf by looking up the value in cells_depots_df.
+
+    Parameters:
+    ----------
+    cells_gdf : GeoDataFrame
+        GeoDataFrame of cells, each identified by a unique cell_id.
+
+    cells_depots_df : GeoDataFrame
+        GeoDataFrame mapping cells to depots, with columns:
+        - 'cell_id': Identifier for the cell.
+        - 'closest_depot': Identifier of the closest depot.
+
+    Returns:
+    -------
+    cells_gdf : GeoDataFrame
+        Updated GeoDataFrame with a 'closest_depot' column added.
+    """
+    # Ensure the input GeoDataFrames have the necessary columns
+    if 'cell_id' not in cells_gdf.columns or 'cell_id' not in cells_depots_df.columns:
+        raise ValueError("Both cells_gdf and cells_depots_df must have a 'cell_id' column.")
+    if 'closest_depot' not in cells_depots_df.columns:
+        raise ValueError("cells_depots_df must have a 'closest_depot' column.")
+
+    new_cells_gdf = cells_gdf.copy()
+
+    # Merge the 'closest_depot' information into cells_gdf based on 'cell_id'
+    new_cells_gdf = new_cells_gdf.merge(
+        cells_depots_df[['cell_id', 'closest_depot']],
+        on='cell_id',
+        how='left'
+    )
+
+    return new_cells_gdf
+
+cells_gdf = add_closest_depot_to_cells(cells_gdf, cells_depots_df)
+cells_gdf
+```
+
+```python
 cell_gdf_4326 = cells_gdf.copy().to_crs(visualization_crs)
 # print(cell_gdf_4326.crs)
 
@@ -549,7 +594,7 @@ def target_display_layers(depot_data, cell_data, targets_data):
 ```
 
 ```python
-from ipyleaflet import Choropleth, GeoJSON, WidgetControl, FullScreenControl, GeomanDrawControl
+from ipyleaflet import Map, Choropleth, GeoJSON, WidgetControl, FullScreenControl, GeomanDrawControl
 from ipywidgets import Select, Dropdown
 import matplotlib as plt
 from shapely.geometry import mapping, shape
