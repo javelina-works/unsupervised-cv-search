@@ -308,323 +308,55 @@ macro_routes_gdf = solve_macro_routes(cells_gdf, depots_gdf, targets_gdf, target
 
 # ### 5. Micro Route Solving
 
-macro_routes_gdf
-
-# ## Display Associated Targets
-
-# +
-import geopandas as gpd
-
-def associate_targets_with_routes(targets_gdf, macro_routes_gdf):
-    # Initialize a new column for route_id in targets_gdf
-    targets_gdf["route_id"] = None
-
-    # Iterate through the macro_routes_gdf rows
-    for _, route_row in macro_routes_gdf.iterrows():
-        route_id = route_row["route_id"]
-        route_cells = route_row["route_cells"]
-        
-        # Update targets_gdf: Assign route_id to targets whose parent_cell_id is in route_cells
-        targets_gdf.loc[targets_gdf["parent_cell_id"].isin(route_cells), "route_id"] = route_id
-
-    return targets_gdf
-
-routed_targets_gdf = associate_targets_with_routes(targets_gdf, macro_routes_gdf)
-# routed_targets_gdf
+# #### 5a. Associate Targets, Routes, and Cells
+#
+# Leverage the computation that came from the 'macro routes' step to cleanly associate targets with macro routes. 
+#
+# Once we know which targets are a part of which macro route, we can then solve for the target-to-target TSP solution.
 
 # +
-import matplotlib.pyplot as plt
-import geopandas as gpd
+from macro_planning.junctions import create_targets_routes_gdf
 
-def plot_targets_by_route(targets_gdf, depot_id):
-    """
-    Plot all targets for a single depot, coloring targets by route_id.
+targets_routes_gdf = create_targets_routes_gdf(targets_gdf, cells_gdf, macro_routes_gdf, cell_targets_df)
+# targets_routes_gdf
+# -
 
-    Parameters:
-    - targets_gdf: GeoDataFrame
-        GeoDataFrame containing target points with 'route_id' and 'parent_cell_id' columns.
-    - depot_id: str
-        The depot_id to filter and plot routes from.
-    """
-    # Filter targets for the given depot_id
-    depot_targets = targets_gdf[targets_gdf['route_id'].str.startswith(depot_id)]
-    
-    # Get unique route_ids for the depot
-    unique_routes = depot_targets['route_id'].unique()
-    
-    # Set up the plot
-    fig, ax = plt.subplots(figsize=(10, 8))
-    region_outline_gdf.boundary.plot(ax=ax, color="blue", linestyle="--", label="Simplified Region Outline")
-    cells_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
-    # base_station_gdf.plot(ax=ax, color='red', markersize=80, marker='*', zorder=10, label='Base Station')
-    
-    # Plot targets for each route_id in a different color
-    for route_id in unique_routes:
-        route_targets = depot_targets[depot_targets['route_id'] == route_id]
-        route_targets.plot(ax=ax, marker='o', label=route_id, alpha=0.6)
-    
-    # Set plot labels and legend
-    ax.set_title(f"Targets by Route for Depot {depot_id}", fontsize=16)
-    ax.set_xlabel("Longitude", fontsize=12)
-    ax.set_ylabel("Latitude", fontsize=12)
-    ax.legend(title="Route ID", fontsize=10, loc='best')
-    plt.show()
-
-# Example usage with dummy data
-# Replace with real data as required
-
-plot_depot_id = depots_gdf.iloc[0]['depot_id']
-plot_targets_by_route(routed_targets_gdf, depot_id=plot_depot_id)  # Uncomment and replace with actual variables
-
+# #### 5b. Solve Micro Routes 
+#
+# For each depot, find the most efficient path to visit all targets in each macro route.
 
 # +
-from ortools.constraint_solver import pywrapcp, routing_enums_pb2
-from shapely.geometry import Point
+from macro_planning.micro_routes import (
+    calculate_all_routes_tsp,
+    create_micro_routes_gdf
+)
 
-def calculate_tsp_route(route_targets_gdf, depot_point):
-    """
-    Calculate the TSP approximate shortest path for targets in a given route.
-
-    Parameters:
-    - route_targets_gdf: GeoDataFrame
-        GeoDataFrame of targets for a specific route_id.
-    - depot_point: shapely.geometry.Point
-        Coordinates of the depot, used as the starting and ending point.
-
-    Returns:
-    - ordered_points: list of shapely.geometry.Point
-        The ordered sequence of points representing the TSP route.
-    - total_distance: float
-        The total distance of the TSP route.
-    """
-    # Combine depot and targets into a single list of points
-    points = [depot_point] + list(route_targets_gdf["geometry"])
-    num_points = len(points)
-    
-    # Create distance matrix
-    def distance_matrix():
-        return [
-            [points[i].distance(points[j]) for j in range(num_points)]
-            for i in range(num_points)
-        ]
-    
-    dist_matrix = distance_matrix()
-
-    # Create the TSP solver
-    manager = pywrapcp.RoutingIndexManager(len(dist_matrix), 1, 0)
-    routing = pywrapcp.RoutingModel(manager)
-
-    def distance_callback(from_index, to_index):
-        from_node = manager.IndexToNode(from_index)
-        to_node = manager.IndexToNode(to_index)
-        return int(dist_matrix[from_node][to_node] * 1000)  # Scale for integer optimization
-
-    transit_callback_index = routing.RegisterTransitCallback(distance_callback)
-    routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-
-    # Solve TSP
-    search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-    search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
-    solution = routing.SolveWithParameters(search_parameters)
-
-    if not solution:
-        raise ValueError("No solution found for TSP!")
-
-    # Extract the ordered sequence of points
-    index = routing.Start(0)
-    ordered_points = []
-    while not routing.IsEnd(index):
-        node_index = manager.IndexToNode(index)
-        ordered_points.append(points[node_index])
-        index = solution.Value(routing.NextVar(index))
-    ordered_points.append(points[0])  # Return to depot
-
-    # Calculate total distance
-    total_distance = sum(
-        ordered_points[i].distance(ordered_points[i + 1]) for i in range(len(ordered_points) - 1)
-    )
-    
-    return ordered_points, total_distance
-
-
-def calculate_all_routes_tsp(routed_targets_gdf, depot_point_gdf):
-    """
-    Calculate the TSP route for all targets grouped by route_id.
-    
-    Parameters:
-    - targets_gdf: GeoDataFrame
-        GeoDataFrame of all targets, including route_id and geometry.
-    - macro_routes_gdf: GeoDataFrame
-        GeoDataFrame of macro routes with route_id and associated route_cells.
-    - depot_point: shapely.geometry.Point
-        Coordinates of the depot, used as the starting and ending point.
-
-    Returns:
-    - results: dict
-        Dictionary where keys are route_ids and values are (ordered_points, total_distance).
-    """
-    results = {}
-    unique_route_ids = routed_targets_gdf["route_id"].unique()
-
-    plot_depot_id = depot_point_gdf.iloc[0]['depot_id']
-    route_targets_gdf = routed_targets_gdf[routed_targets_gdf['closest_depot'] == plot_depot_id]
-    depot_point = depots_gdf.iloc[0]['geometry']
-
-    for route_id in unique_route_ids:
-        route_targets = route_targets_gdf[route_targets_gdf["route_id"] == route_id]
-        if not route_targets.empty:
-            ordered_points, total_distance = calculate_tsp_route(route_targets, depot_point)
-            results[route_id] = {"ordered_points": ordered_points, "total_distance": total_distance}
-    
-    return results
-
-
-
-# +
-# Mystery: why does the CRS sometimes change?
-# routed_targets_gdf
-
-# +
 depot_point_gdf = depots_gdf.iloc[[0]] # GDF of just one row
 
-results = calculate_all_routes_tsp(routed_targets_gdf, depot_point_gdf)
+results = calculate_all_routes_tsp(targets_routes_gdf, depot_point_gdf)
+
+depot_point = depot_point_gdf.iloc[0]['geometry']
+micro_routes_gdf = create_micro_routes_gdf(results, macro_routes_gdf, depot_point_gdf)
+
+plot_depot_id = depot_point_gdf.iloc[0]['depot_id']
 
 # # Print results for each route
 # for route_id, data in results.items():
 #     print(f"Route ID: {route_id}")
 #     print(f"Ordered Points: {data['ordered_points']}")
 #     print(f"Total Distance: {data['total_distance']:.2f}")
+# -
+
+# #### 5c. Display Targeted Routes
 
 # +
-def plot_routes(results, depot_point, macro_routes_gdf):
-    """
-    Plot TSP routes for all route_ids associated with a depot.
+from macro_planning.visualize_micros import (
+    plot_targets_by_route,
+    plot_depot_micro_routes
+)
 
-    Parameters:
-    - results: dict
-        Dictionary of TSP results, where keys are route_ids and values are
-        {'ordered_points': list of shapely.geometry.Point, 'total_distance': float}.
-    - depot_point: shapely.geometry.Point
-        Coordinates of the depot, plotted as a reference point.
-    - macro_routes_gdf: GeoDataFrame
-        GeoDataFrame containing route information for labeling.
-    """
-    # Set up the plot
-    fig, ax = plt.subplots(figsize=(12, 10))
-    region_outline_gdf.boundary.plot(ax=ax, color="blue", linestyle="--", label="Simplified Region Outline")
-    cells_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
-    
-    # Plot each route with a unique color
-    for route_id, data in results.items():
-        ordered_points = data['ordered_points']
-        x_coords, y_coords = zip(*[(point.x, point.y) for point in ordered_points])
-        
-        # Plot the route as a line
-        ax.plot(x_coords, y_coords, label=f"{route_id} (Distance: {data['total_distance']:.2f})", alpha=0.7)
-        ax.scatter(x_coords, y_coords, s=40)  # Plot the points
-        
-    # Plot the depot
-    ax.scatter(depot_point.x, depot_point.y, color='red', s=100, label='Depot', zorder=5)
-    
-    # Set plot labels and legend
-    ax.set_title("TSP Routes by Route ID", fontsize=16)
-    ax.set_xlabel("Longitude", fontsize=12)
-    ax.set_ylabel("Latitude", fontsize=12)
-    ax.legend(title="Routes", fontsize=10, loc='best')
-    plt.show()
-
-# Example usage with dummy data
-# Replace with real data as required
-depot_point = depots_gdf.iloc[0]['geometry']
-plot_routes(results, depot_point, macro_routes_gdf)  # Uncomment and replace with actual variables
-
-
-# +
-from shapely.geometry import LineString
-import geopandas as gpd
-
-def create_micro_routes_gdf(results, macro_routes_gdf, depot_point):
-    """
-    Create a GeoDataFrame of polylines for the solved micro routes.
-
-    Parameters:
-    - results: dict
-        Dictionary of TSP results, where keys are route_ids and values are
-        {'ordered_points': list of shapely.geometry.Point, 'total_distance': float}.
-    - macro_routes_gdf: GeoDataFrame
-        GeoDataFrame containing route information (e.g., route_cells, route_id).
-    - depot_point: shapely.geometry.Point
-        Coordinates of the depot.
-
-    Returns:
-    - routes_gdf: GeoDataFrame
-        GeoDataFrame of polylines with columns for 'route_id', 'closest_depot', and 'route_cells'.
-    """
-    route_ids = []
-    polylines = []
-    closest_depots = []
-    route_cells_list = []
-
-    for route_id, data in results.items():
-        ordered_points = data['ordered_points']
-        route_line = LineString(ordered_points)  # Create a LineString from the ordered points
-
-        # Get the corresponding row in macro_routes_gdf for additional attributes
-        macro_route_row = macro_routes_gdf[macro_routes_gdf['route_id'] == route_id].iloc[0]
-        route_cells = macro_route_row['route_cells']
-
-        # Append data for the GeoDataFrame
-        route_ids.append(route_id)
-        polylines.append(route_line)
-        closest_depots.append(depot_point)
-        route_cells_list.append(route_cells)
-
-    # Create the GeoDataFrame
-    routes_gdf = gpd.GeoDataFrame({
-        "route_id": route_ids,
-        "geometry": polylines,
-        "closest_depot": closest_depots,
-        "route_cells": route_cells_list
-    }, crs=macro_routes_gdf.crs)
-    
-    return routes_gdf
-
-micro_routes_gdf = create_micro_routes_gdf(results, macro_routes_gdf, depot_point)
-print(micro_routes_gdf)
-
-
-# +
-import math 
-import matplotlib.pyplot as plt
-
-base_station = base_station_gdf.geometry.iloc[0]  # Assuming single base station
-
-# Plot centroids, region outline, and base station
-fig, ax = plt.subplots(figsize=(12, 10))
-region_outline_gdf.boundary.plot(ax=ax, color="blue", linestyle="--", label="Simplified Region Outline")
-cell_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")  # Region cells
-base_station_gdf.plot(ax=ax, color='red', markersize=80, marker='*', zorder=10, label='Base Station')
-
-centroids = station_cells_gdf.cell_centroid
-for i, centroid in enumerate(centroids):
-    ax.scatter(centroid.x, centroid.y, color='blue', s=20, alpha=0.5, label='Centroid' if i == 0 else "")
-    ax.text(centroid.x, centroid.y, str(i), fontsize=10, ha='right')
-
-# Generate a colormap for routes
-cmap = plt.get_cmap("tab20", len(macro_routes_gdf))  # Tab10 provides distinct colors
-for route_idx, (index, row) in enumerate(macro_routes_gdf.iterrows()):
-    ax.plot(*row.geometry.xy, color=cmap(route_idx), label=f"Route {index}")
-
-ax.legend(loc="upper right", fontsize="small", title="Routes", ncol=2)
-
-# Final plot details
-ax.set_title("Route polylines", fontsize=16)
-ax.set_xlabel("Longitude")
-ax.set_ylabel("Latitude")
-ax.legend(loc='upper right', fontsize=10)
-plt.grid(True)
-plt.show()
-
+plot_targets_by_route(region_outline_gdf, cells_gdf, targets_routes_gdf, depot_id=plot_depot_id)
+plot_depot_micro_routes(region_outline_gdf, cells_gdf, results, depot_point)
 
 # -
 
@@ -647,7 +379,7 @@ print_gdf_info(cells_gdf, "cells_gdf")
 print_gdf_info(targets_gdf, "targets_gdf")
 print_gdf_info(depots_gdf, "depots_gdf")
 print_gdf_info(macro_routes_gdf, "macro_routes_gdf")
-# print_gdf_info(micro_routes_gdf, "micro_routes_gdf")
+print_gdf_info(micro_routes_gdf, "micro_routes_gdf")
 
 # +
 cell_gdf_4326 = cells_gdf.copy().to_crs(visualization_crs)
