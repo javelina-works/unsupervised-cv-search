@@ -96,6 +96,7 @@ macro_routes_filename = '../input/interactive_proto/macro_routes.geojson'
 
 # Micro route planning parameters
 micro_routes_filename = '../input/interactive_proto/micro_routes.geojson'
+waypoints_files_dir = '../outputs/interactive_proto'
 
 ```
 
@@ -428,7 +429,7 @@ def add_closest_depot_to_cells(cells_gdf, cells_depots_df):
     return new_cells_gdf
 
 cells_gdf = add_closest_depot_to_cells(cells_gdf, cells_depots_df)
-cells_gdf
+# cells_gdf
 ```
 
 ```python
@@ -465,6 +466,59 @@ micro_routes_gdf.to_crs(visualization_crs, inplace=True)
 micro_routes_gdf.to_file(micro_routes_filename, driver="GeoJSON")
 ```
 
+```python
+import os
+import geopandas as gpd
+
+def save_routes_as_waypoints(micro_routes_gdf, output_dir):
+    """
+    Save routes as .waypoints files for Mission Planner and QGroundControl.
+
+    Parameters:
+    - micro_routes_gdf (GeoDataFrame): GeoDataFrame containing routes.
+        Must have columns: 'route_id' (unique identifier for each route) 
+        and 'geometry' (LineString or MultiLineString of the route).
+    - output_dir (str): Path to the directory where .waypoints files will be saved.
+    """
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    for _, route in micro_routes_gdf.iterrows():
+        route_id = route['route_id']
+        geometry = route['geometry']
+
+        # Ensure the geometry is a LineString or MultiLineString
+        if geometry.is_empty or not geometry.is_valid:
+            print(f"Skipping invalid or empty geometry for route {route_id}")
+            continue
+        
+        # Extract waypoints from the route geometry
+        waypoints = []
+        if geometry.geom_type == 'LineString':
+            waypoints = list(geometry.coords)
+        elif geometry.geom_type == 'MultiLineString':
+            for line in geometry:
+                waypoints.extend(line.coords)
+
+        # Format waypoints for .waypoints file
+        waypoint_lines = ["QGC WPL 110"]  # File header
+        for i, (lon, lat) in enumerate(waypoints, start=1):
+            # Format: index, current, coord_frame, command, param1, param2, param3, param4, lat, lon, alt, autocontinue
+            waypoint_line = f"{i}\t0\t3\t16\t0\t0\t0\t0\t{lat:.6f}\t{lon:.6f}\t10\t1"
+            waypoint_lines.append(waypoint_line)
+
+        # Write to file
+        file_path = os.path.join(output_dir, f"{route_id}.waypoints")
+        with open(file_path, 'w') as f:
+            f.write('\n'.join(waypoint_lines))
+        print(f"Saved route {route_id} as {file_path}")
+
+```
+
+```python
+save_routes_as_waypoints(micro_routes_gdf, waypoints_files_dir)
+```
+
 ## Interactive Depot Map
 
 Select a depot using ipywidgets dropdown to see information relevant to the given depot.
@@ -480,6 +534,101 @@ interactive_map = display_interactive_map(
     micro_routes=micro_routes_filename
 )
 interactive_map
+```
+
+```python
+from ipyleaflet import (
+    Map, GeoJSON, LayersControl, ScaleControl, ImageOverlay
+)
+from plant_search.load_image import load_image
+from shapely.geometry import shape
+import json
+
+
+def plot_route_on_image(region_geojson, micro_routes_filename, orthophoto_path=None):
+
+    # Get image data
+    image, transform, bounds, image_crs = load_image(orthophoto_path)
+
+    with open(region_geojson, "r") as f:
+        region_contour_data = json.load(f)
+    region_geometry = shape(region_contour_data['features'][0]['geometry'])
+    region_center = region_geometry.centroid
+
+    with open(micro_routes_filename, "r") as f:
+        micro_routes_data = json.load(f)
+
+    m = Map(center=(region_center.y, region_center.x), zoom=16, scroll_wheel_zoom=True)
+
+    # Add orthophoto overlay
+    overlay = ImageOverlay(url=orthophoto_path, bounds=bounds)
+    m.add(overlay)
+
+    # # Add the region border to the map
+    # region_layer = GeoJSON(
+    #     data=region_contour_data, 
+    #     style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+    #     name=region_contour_data['name'])
+    # m.add(region_layer)
+
+    # routes_layer = GeoJSON(
+    #     data=micro_routes_data, 
+    #     style={'color': 'green', 'fillColor': 'green', 'opacity': 0.25, 'weight': 1},
+    #     hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
+    #     name=f'Micro Routes'
+    # )
+    # m.add(routes_layer)
+
+    m.add(LayersControl(position='topright'))
+    m.add(ScaleControl(position='bottomleft'))
+    return m
+
+m = plot_route_on_image(region_contour_geojson, micro_routes_filename, region_image_path)
+m
+```
+
+```python
+from plant_search.load_image import load_image
+
+import rasterio
+import geopandas as gpd
+import matplotlib.pyplot as plt
+
+def plot_geotiff_with_routes(geotiff_path, micro_routes_gdf):
+    """
+    Plots a GeoTIFF image with routes from a GeoDataFrame on a matplotlib figure.
+
+    Parameters:
+    - geotiff_path (str): Path to the GeoTIFF file.
+    - micro_routes_gdf (GeoDataFrame): GeoDataFrame containing route geometries.
+        Must have a 'geometry' column with LineStrings or MultiLineStrings.
+    """
+    # Open the GeoTIFF file
+    image, transform, bounds, image_crs = load_image(geotiff_path)
+
+    print(image_crs)
+    print(micro_routes_gdf.crs)
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    # Plot the GeoTIFF image
+    ax.imshow(image, cmap='gray', extent=bounds, origin='upper')  # Adjust colormap as needed
+
+    # Plot the routes from the GeoDataFrame
+    micro_routes_gdf.plot(ax=ax, color='red', linewidth=1, label='Micro-Routes')
+
+    # Add labels, legend, and grid
+    ax.set_title("GeoTIFF with Micro-Routes", fontsize=16)
+    ax.set_xlabel("Longitude", fontsize=12)
+    ax.set_ylabel("Latitude", fontsize=12)
+    ax.legend()
+    ax.grid(True)
+
+    # Show the plot
+    plt.show()
+
+plot_geotiff_with_routes(region_image_path, micro_routes_gdf)
 ```
 
 ## Display Targets w/ Cell Depot

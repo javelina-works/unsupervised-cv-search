@@ -372,18 +372,18 @@ from plant_search.macro_planning import (
 )
 
 
-calculate_cell_workloads(cell_gdf, targets_gdf) # In-place updates
+cells_gdf, targets_gdf = calculate_cell_workloads(cell_gdf, targets_gdf) # In-place updates
 
 # Ensure base station is a valid Point geometry
 
 # Compute distance from each cell centroid to the base station
 base_station_point = base_station_gdf.geometry.iloc[0]
-cell_gdf['home_distance'] = cell_gdf['cell_centroid'].distance(base_station_point)
+cells_gdf['home_distance'] = cells_gdf['cell_centroid'].distance(base_station_point)
 # cell_gdf['total_workload'] = cell_gdf['intra_workload'] + (2 * cell_gdf['home_distance'])
 
 # Visualize cell workloads
 # plot_cells_with_targets(cell_gdf)
-plot_cells_ids(cell_gdf)
+plot_cells_ids(cells_gdf)
 
 # targets_gdf
 # joined

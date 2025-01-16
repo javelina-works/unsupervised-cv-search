@@ -25,6 +25,10 @@ jupyter:
 ---
 
 ```python
+%pip install -q ipywidgets
+```
+
+```python
 # Load required libraries
 import numpy as np
 import cv2
@@ -39,7 +43,7 @@ from pathlib import Path
 # Add the parent directory to the Python path
 sys.path.append(str(Path.cwd().parent))
 
-%matplotlib inline
+# %matplotlib inline
 ```
 
 # Data Loading and Preprocessing
@@ -62,11 +66,19 @@ from plant_search.load_image import load_image, plot_image
 
 # file_path = '../input/ESPG-4326-orthophoto.tif'
 # file_path = '../input/MADRID_RGB.tif'
-file_path = '../input/aerial-trees.jpg'
+# file_path = '../input/aerial-trees.jpg'
+# file_path = '../input/DJI_0010.JPG'
+# file_path = '../input/DJI_0015.JPG'
+file_path = '../input/DJI_0093.JPG'
+# file_path = '../input/DJI_0119.JPG'
+# file_path = '../input/Brewster-ortho.tif'
 
-image = load_image(file_path)
+ds = 4 # downscale ratio
+
+image, _, _, _ = load_image(file_path)
 if image is not None:
     plot_image(image, "Original Image")
+    image = image[::ds, ::ds]
 
 ```
 
@@ -262,6 +274,7 @@ display(summary_stats)
 
 ```python
 from skimage.morphology import erosion, dilation, opening, closing, disk
+from ipywidgets import interact, FloatSlider
 
 # Interactive function
 def interactive_morphology(threshold):
@@ -273,7 +286,7 @@ def interactive_morphology(threshold):
     """
 
     # Clear any previous plots
-    plt.close('all')
+    # plt.close('all')
 
     # Create binary mask
     exg = indices["ExG"]
@@ -289,36 +302,32 @@ def interactive_morphology(threshold):
     closed = closing(binary_mask, selem)
 
     # Visualize results in two rows
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    fig, axes = plt.subplots(1, 4, figsize=(15, 10))
 
     # Row 1: Erosion and Dilation
-    axes[0, 0].imshow(eroded, cmap='gray')
-    axes[0, 0].set_title("Erosion")
-    axes[0, 0].axis("off")
+    axes[0].imshow(eroded, cmap='gray')
+    axes[0].set_title("Erosion")
+    axes[0].axis("off")
 
-    axes[0, 1].imshow(dilated, cmap='gray')
-    axes[0, 1].set_title("Dilation")
-    axes[0, 1].axis("off")
+    axes[1].imshow(dilated, cmap='gray')
+    axes[1].set_title("Dilation")
+    axes[1].axis("off")
 
     # Row 2: Opening and Closing
-    axes[1, 0].imshow(opened, cmap='gray')
-    axes[1, 0].set_title("Opening")
-    axes[1, 0].axis("off")
+    axes[2].imshow(opened, cmap='gray')
+    axes[2].set_title("Opening")
+    axes[2].axis("off")
 
-    axes[1, 1].imshow(closed, cmap='gray')
-    axes[1, 1].set_title("Closing")
-    axes[1, 1].axis("off")
+    axes[3].imshow(closed, cmap='gray')
+    axes[3].set_title("Closing")
+    axes[3].axis("off")
 
     # Adjust layout
     plt.tight_layout()
     plt.show()
 
 # Create an interactive slider for threshold adjustment
-interact(
-    interactive_morphology,
-    threshold=FloatSlider(value=0.2, min=0.0, max=1.0, step=0.01, description="Threshold")
-);
-
+interact(interactive_morphology, threshold=FloatSlider(value=0.2, min=0.0, max=1.0, step=0.01, description="Threshold"));
 ```
 
 ### Noise Reduction
@@ -436,7 +445,7 @@ bilateral_smoothed_exg = cv2.bilateralFilter(
 bilateral_smoothed_exg = bilateral_smoothed_exg / 255.0  # Scale back to [0, 1]
 
 # Step 2: Contrast Enhancement with CLAHE
-clahe_exg = equalize_adapthist(bilateral_smoothed_exg, clip_limit=0.03)
+clahe_exg = equalize_adapthist(bilateral_smoothed_exg, clip_limit=0.02)
 
 # Step 3: Morphological Operations (Opening → Closing)
 selem = disk(7)  # Structuring element
@@ -482,6 +491,18 @@ plt.tight_layout()
 plt.show()
 
 ```
+
+### Pipeline Example Commentary
+
+In our example image taken from our working environment, we see that the ExG vegetation index continues to serve us well, locating our target plants while ignoring noise such as smaller brush and shadows. However, we also see some definite limitations with the current implementation.
+
+Steps 1 and 2, Normalized ExG and Bilateral Filtering work splendidly. Immediately, we can see our intended regions are correctly identified with relatively high contrast already. 
+
+Step 3, CLAHE, becomes problematic. Looking at some of the smaller shrubs, we can see that they become nicely filled in, constituting the actual region and space taken. We also see high rejection of most noise (the dead woody plant in the top right, and each shadow) working. 
+
+Yet, in the top left quadrant, we also see the emergence of a nebulous region of noise that was just barely perceptible in steps 1 and 2, and that does not represent a target plant. This introduced noise makes it into the final binary mask, ultimately becoming a false positive identified region.
+
+**Key Question**: How can we enhance the detected regions and "fill in" our plants without introducing false regions into our output binary mask?
 
 ```python
 from skimage.io import imsave

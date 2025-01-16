@@ -74,7 +74,7 @@ file_path = '../input/DJI_0093.JPG'
 
 ds = 4 # downscale ratio
 
-image = load_image(file_path)
+image, transform, bounds, image_crs = load_image(file_path)
 if image is not None:
     plot_image(image, "Original Image")
     image = image[::ds, ::ds]
@@ -181,7 +181,7 @@ def update_threshold_and_opacity(threshold, opacity):
     overlayed_image = overlay_mask(image, green_mask, color=(0, 255, 0), alpha=opacity)
     
     # Visualize the overlay
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(10, 20))
     plt.imshow(overlayed_image)
     plt.title(f"Overlayed Image (Threshold = {threshold:.2f}, Opacity = {opacity:.2f})")
     plt.axis("off")
