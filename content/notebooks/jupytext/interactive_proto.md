@@ -537,6 +537,22 @@ interactive_map
 ```
 
 ```python
+from plant_search.load_image import load_image
+from rasterio.crs import CRS
+
+image, transform, bounds, image_crs = load_image(region_image_path)
+
+# Define your CRS
+crs = CRS.from_wkt(image_crs.to_wkt())
+
+# Convert to a dictionary
+crs_dict = crs.to_dict()
+
+# Print the dictionary
+print(crs_dict)
+```
+
+```python
 from ipyleaflet import (
     Map, GeoJSON, LayersControl, ScaleControl, ImageOverlay
 )
@@ -544,6 +560,7 @@ from plant_search.load_image import load_image
 from shapely.geometry import shape
 import json
 
+from ipyleaflet.projections import projections
 
 def plot_route_on_image(region_geojson, micro_routes_filename, orthophoto_path=None):
 
@@ -558,26 +575,43 @@ def plot_route_on_image(region_geojson, micro_routes_filename, orthophoto_path=N
     with open(micro_routes_filename, "r") as f:
         micro_routes_data = json.load(f)
 
-    m = Map(center=(region_center.y, region_center.x), zoom=16, scroll_wheel_zoom=True)
+
+    custom_crs = {
+        'proj': 'utm',
+        'zone': 13,
+        'datum': 'WGS84',
+        'units': 'm',
+        'lat_0': 0,
+        'lon_0': -105,
+        'k': 0.9996,
+        'x_0': 500000,
+        'y_0': 0,
+        'ellps': 'WGS84',
+        'no_defs': True
+    }
+    
+
+    m = Map(center=(region_center.y, region_center.x),
+            zoom=16, scroll_wheel_zoom=True, crs=projections.EPSG4326)
 
     # Add orthophoto overlay
     overlay = ImageOverlay(url=orthophoto_path, bounds=bounds)
     m.add(overlay)
 
-    # # Add the region border to the map
-    # region_layer = GeoJSON(
-    #     data=region_contour_data, 
-    #     style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
-    #     name=region_contour_data['name'])
-    # m.add(region_layer)
+    # Add the region border to the map
+    region_layer = GeoJSON(
+        data=region_contour_data, 
+        style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+        name=region_contour_data['name'])
+    m.add(region_layer)
 
-    # routes_layer = GeoJSON(
-    #     data=micro_routes_data, 
-    #     style={'color': 'green', 'fillColor': 'green', 'opacity': 0.25, 'weight': 1},
-    #     hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
-    #     name=f'Micro Routes'
-    # )
-    # m.add(routes_layer)
+    routes_layer = GeoJSON(
+        data=micro_routes_data, 
+        style={'color': 'green', 'fillColor': 'green', 'opacity': 0.25, 'weight': 1},
+        hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
+        name=f'Micro Routes'
+    )
+    m.add(routes_layer)
 
     m.add(LayersControl(position='topright'))
     m.add(ScaleControl(position='bottomleft'))
@@ -605,15 +639,14 @@ def plot_geotiff_with_routes(geotiff_path, micro_routes_gdf):
     """
     # Open the GeoTIFF file
     image, transform, bounds, image_crs = load_image(geotiff_path)
-
-    print(image_crs)
-    print(micro_routes_gdf.crs)
+    extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+    micro_routes_gdf = micro_routes_gdf.to_crs(region_crs)  # Match the GeoTIFF CRS
 
     # Create the plot
     fig, ax = plt.subplots(figsize=(10, 10))
 
     # Plot the GeoTIFF image
-    ax.imshow(image, cmap='gray', extent=bounds, origin='upper')  # Adjust colormap as needed
+    ax.imshow(image, cmap='gray', extent=extent, origin='upper')  # Adjust colormap as needed
 
     # Plot the routes from the GeoDataFrame
     micro_routes_gdf.plot(ax=ax, color='red', linewidth=1, label='Micro-Routes')
