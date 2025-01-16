@@ -328,7 +328,7 @@ gpd.GeoDataFrame({"geometry": [simplified_polygon]}).boundary.plot(ax=ax, color=
 cell_gdf.boundary.plot(ax=ax, color="blue", alpha=0.5, label="Voronoi Cells") # Region cells
 # cell_gdf.set_geometry('cell_centroid').plot(ax=ax, color="red", markersize=10, label="Cell Centroids")
 base_station_gdf.plot(ax=ax, color='red', markersize=60, marker='*', label='Base Station')
-test_point_gdf.plot(ax=ax, color='purple', markersize=60, marker='*', label='Base Station')
+# test_point_gdf.plot(ax=ax, color='purple', markersize=60, marker='*', label='Base Station')
 
 targets_gdf.plot(ax=ax, color='green', markersize=3, label='Centroids') # Plot targets centroids
 targets_gdf.set_geometry('bounding_box').plot(ax=ax, edgecolor='orange', facecolor='none', linewidth=1.0) # Plot targets bounding boxes

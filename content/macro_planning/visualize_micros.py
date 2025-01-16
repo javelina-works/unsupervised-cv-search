@@ -72,3 +72,56 @@ def plot_depot_micro_routes(region_outline_gdf, cells_gdf, results, depot_point)
     ax.set_ylabel("Latitude", fontsize=12)
     ax.legend(title="Routes", fontsize=10, loc='best')
     plt.show()
+
+
+def plot_all_micro_routes(region_outline_gdf, cells_gdf, all_routes_gdf, depots_gdf):
+    """
+    Plot TSP routes for all depots and their associated routes.
+
+    Parameters:
+    ----------
+    region_outline_gdf : GeoDataFrame
+        GeoDataFrame representing the region outline, used as a boundary.
+
+    cells_gdf : GeoDataFrame
+        GeoDataFrame of cells (e.g., Voronoi or other tessellation).
+
+    all_routes_gdf : GeoDataFrame
+        GeoDataFrame containing all micro routes, with columns:
+        - 'route_id': Unique identifier for the route.
+        - 'geometry': LineString geometry for the route.
+        - 'closest_depot': Identifier of the depot associated with the route.
+
+    depots_gdf : GeoDataFrame
+        GeoDataFrame of depot points, with columns:
+        - 'depot_id': Unique identifier for the depot.
+        - 'geometry': Point geometry for the depot location.
+    """
+    # Set up the plot
+    fig, ax = plt.subplots(figsize=(14, 12))
+    
+    # Plot the region outline and cells
+    region_outline_gdf.boundary.plot(ax=ax, color="blue", linestyle="--", label="Simplified Region Outline")
+    cells_gdf.boundary.plot(ax=ax, color="blue", linewidth=1, alpha=0.5, label="Voronoi Cells")
+
+    # Plot each depot
+    depots_gdf.plot(ax=ax, color='red', markersize=80, marker='*', label='Depots', zorder=5)
+    
+    # Plot each route with a unique color
+    for _, route_row in all_routes_gdf.iterrows():
+        route_line = route_row['geometry']
+        route_id = route_row['route_id']
+        depot_id = route_row['closest_depot']
+
+        x_coords, y_coords = zip(*route_line.coords)
+        
+        # Plot the route as a line
+        ax.plot(x_coords, y_coords, label=f"Route {route_id}", alpha=0.7)
+        ax.scatter(x_coords, y_coords, s=20)  # Plot the points
+
+    # Set plot labels and legend
+    ax.set_title("TSP Routes for All Depots", fontsize=16)
+    ax.set_xlabel("Longitude", fontsize=12)
+    ax.set_ylabel("Latitude", fontsize=12)
+    ax.legend(title="Routes and Depots", fontsize=10, loc='best')
+    plt.show()

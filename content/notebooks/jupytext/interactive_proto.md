@@ -94,6 +94,9 @@ t_slack_routes = 5
 t_num_vehicles = 25
 macro_routes_filename = '../input/interactive_proto/macro_routes.geojson'
 
+# Micro route planning parameters
+micro_routes_filename = '../input/interactive_proto/micro_routes.geojson'
+
 ```
 
 ### 1. Region Input & Cell Partitioning
@@ -336,25 +339,15 @@ targets_routes_gdf = create_targets_routes_gdf(targets_gdf, cells_gdf, macro_rou
 For each depot, find the most efficient path to visit all targets in each macro route.
 
 ```python
-from macro_planning.micro_routes import (
-    calculate_all_routes_tsp,
-    create_micro_routes_gdf
-)
+from macro_planning.micro_routes import create_all_micro_routes_gdf
 
-depot_point_gdf = depots_gdf.iloc[[0]] # GDF of just one row
+# depot_point_gdf = depots_gdf.iloc[[0]] # GDF of just one row
+# depot_point = depot_point_gdf.iloc[0]['geometry']
+# plot_depot_id = depot_point_gdf.iloc[0]['depot_id']
 
-results = calculate_all_routes_tsp(targets_routes_gdf, depot_point_gdf)
 
-depot_point = depot_point_gdf.iloc[0]['geometry']
-micro_routes_gdf = create_micro_routes_gdf(results, macro_routes_gdf, depot_point_gdf)
-
-plot_depot_id = depot_point_gdf.iloc[0]['depot_id']
-
-# # Print results for each route
-# for route_id, data in results.items():
-#     print(f"Route ID: {route_id}")
-#     print(f"Ordered Points: {data['ordered_points']}")
-#     print(f"Total Distance: {data['total_distance']:.2f}")
+micro_routes_gdf = create_all_micro_routes_gdf(targets_routes_gdf, macro_routes_gdf, depots_gdf)
+# micro_routes_gdf
 ```
 
 #### 5c. Display Targeted Routes
@@ -362,12 +355,13 @@ plot_depot_id = depot_point_gdf.iloc[0]['depot_id']
 ```python
 from macro_planning.visualize_micros import (
     plot_targets_by_route,
-    plot_depot_micro_routes
+    plot_depot_micro_routes,
+    plot_all_micro_routes
 )
 
-plot_targets_by_route(region_outline_gdf, cells_gdf, targets_routes_gdf, depot_id=plot_depot_id)
-plot_depot_micro_routes(region_outline_gdf, cells_gdf, results, depot_point)
-
+# plot_targets_by_route(region_outline_gdf, cells_gdf, targets_routes_gdf, depot_id=plot_depot_id)
+# plot_depot_micro_routes(region_outline_gdf, cells_gdf, results, depot_point)
+plot_all_micro_routes(region_outline_gdf, cells_gdf, micro_routes_gdf, depots_gdf)
 ```
 
 ## Write Data to Files
@@ -376,7 +370,7 @@ We store all of our calculated values in the GIS-standard GeoJSON format.
 
 This will allow us to easily display and transfer solution data in future applications, and port our results into common GIS tools.
 
-```python
+<!-- #raw vscode={"languageId": "raw"} -->
 def print_gdf_info(gdf, name):
     print(f"GeoDataFrame: {name}")
     print("Columns and Types:")
@@ -390,7 +384,7 @@ print_gdf_info(targets_gdf, "targets_gdf")
 print_gdf_info(depots_gdf, "depots_gdf")
 print_gdf_info(macro_routes_gdf, "macro_routes_gdf")
 print_gdf_info(micro_routes_gdf, "micro_routes_gdf")
-```
+<!-- #endraw -->
 
 ```python
 cell_gdf_4326 = cells_gdf.copy().to_crs(visualization_crs)
@@ -420,6 +414,10 @@ targets_gdf.to_file(targets_plants_filename, driver="GeoJSON")
 # Write Macro-routes to file
 macro_routes_gdf.to_crs(visualization_crs, inplace=True)
 macro_routes_gdf.to_file(macro_routes_filename, driver="GeoJSON")
+
+# Write Micro-routes to file
+micro_routes_gdf.to_crs(visualization_crs, inplace=True)
+micro_routes_gdf.to_file(micro_routes_filename, driver="GeoJSON")
 ```
 
 ## Interactive Depot Map
@@ -433,7 +431,8 @@ interactive_map = display_interactive_map(
     region_contour_geojson,
     voronoi_partition_filename,
     depots_filename,
-    macro_routes=macro_routes_filename
+    # macro_routes=macro_routes_filename,
+    micro_routes=micro_routes_filename
 )
 interactive_map
 ```
