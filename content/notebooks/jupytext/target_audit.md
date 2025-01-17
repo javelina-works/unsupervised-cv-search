@@ -52,8 +52,8 @@ from ipyleaflet import (
 from ipyleaflet.projections import projections
 from ipywidgets import Layout
 
-from plant_search.load_image import load_image
 from shapely.geometry import shape
+from shapely.wkt import loads
 import json
 import geopandas as gpd
 

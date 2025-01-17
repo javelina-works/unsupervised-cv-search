@@ -124,7 +124,7 @@ if __name__ == "__main__":
 # Usage:
 #-------------
 # To generate tiles: 
-# python tile_server/main.py --generate --zoom 0 1 2 3 --output_dir tile_server/tiles
+# python tile_server/main.py --generate --zoom 21 22 --output_dir tile_server/tiles
 
 # To start server:
 # python tile_server/main.py --serve
