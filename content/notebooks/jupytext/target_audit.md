@@ -41,6 +41,8 @@ visualization_crs = 4326 # Use this when we need leaflet visualizations
 region_contour_geojson = '../input/interactive_proto/region_contour.geojson'
 micro_routes_filename = '../input/interactive_proto/micro_routes.geojson'
 targets_plants_filename = '../input/interactive_proto/targets.geojson'
+depots_filename = '../input/interactive_proto/depot_points.geojson'
+
 ```
 
 ```python
@@ -59,7 +61,7 @@ import geopandas as gpd
 
 from ipyleaflet.projections import projections
 
-def plot_route_on_image(region_geojson, micro_routes_filename, targets_plants_filename):
+def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, targets_plants_filename):
 
     # Get image data
     # image, transform, bounds, image_crs = load_image(orthophoto_path)
@@ -68,6 +70,9 @@ def plot_route_on_image(region_geojson, micro_routes_filename, targets_plants_fi
         region_contour_data = json.load(f)
     region_geometry = shape(region_contour_data['features'][0]['geometry'])
     region_center = region_geometry.centroid
+
+    with open(depots_filename, "r") as f:
+        depot_data = json.load(f)
 
     with open(micro_routes_filename, "r") as f:
         micro_routes_data = json.load(f)
@@ -98,7 +103,7 @@ def plot_route_on_image(region_geojson, micro_routes_filename, targets_plants_fi
     tile_layer = TileLayer(
         url="http://localhost:8000/{z}/{x}/{y}.png",
         min_zoom=15,
-        max_zoom=20,
+        max_zoom=22,
         show_loading=True,
         max_requests_per_tile=5,  # Adjust as needed
         name="Region Image")
@@ -111,13 +116,22 @@ def plot_route_on_image(region_geojson, micro_routes_filename, targets_plants_fi
         name=region_contour_data['name'])
     m.add(region_layer)
 
+    depot_points = GeoJSON(
+        data=depot_data,
+        style={'color': 'black', 'radius':10, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
+        hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+        point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+        name=depot_data['name']
+    )
+    m.add(depot_points)
+
     routes_layer = GeoJSON(
         data=micro_routes_data, 
-        style={'color': 'green', 'fillColor': 'green', 'opacity': 0.25, 'weight': 1},
+        style={'color': 'green', 'fillColor': 'green', 'opacity': 0.75, 'weight': 4},
         hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
         name=f'Micro Routes'
     )
-    # m.add(routes_layer)
+    m.add(routes_layer)
 
     targets_layer = GeoJSON(
         data=targets_data,
@@ -126,11 +140,11 @@ def plot_route_on_image(region_geojson, micro_routes_filename, targets_plants_fi
         point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
         name=targets_data['name']
     )
-    m.add(targets_layer)
+    # m.add(targets_layer)
 
     bboxes_layer = GeoData(geo_dataframe = bboxes_gdf,
                    style={'color': 'red', 'opacity':0.5, 'weight':1.9,
-                          'fillColor': 'red', 'fillOpacity': 0.2
+                          'fill': False, 'fillColor': 'red', 'fillOpacity': 0.2
                           },
                    hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
                    name = 'Countries')
@@ -148,6 +162,6 @@ def plot_route_on_image(region_geojson, micro_routes_filename, targets_plants_fi
     m.add(ScaleControl(position='bottomleft'))
     return m
 
-m = plot_route_on_image(region_contour_geojson, micro_routes_filename, targets_plants_filename)
+m = plot_route_on_image(region_contour_geojson, depots_filename, micro_routes_filename, targets_plants_filename)
 m
 ```
