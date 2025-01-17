@@ -37,8 +37,11 @@ micro_routes_filename = '../input/interactive_proto/micro_routes.geojson'
 
 # +
 from ipyleaflet import (
-    Map, GeoJSON, LayersControl, ScaleControl, ImageOverlay, TileLayer
+    Map, GeoJSON, LayersControl, ScaleControl, ImageOverlay, 
+    TileLayer, LocalTileLayer
 )
+from ipyleaflet.projections import projections
+
 from plant_search.load_image import load_image
 from shapely.geometry import shape
 import json
@@ -62,15 +65,31 @@ def plot_route_on_image(region_geojson, micro_routes_filename):
     
     # Set up the map
     m = Map(center=(region_center.y, region_center.x),
-            zoom=16, scroll_wheel_zoom=True)
+            zoom=16, scroll_wheel_zoom=True,
+            # crs=projections.EPSG4326
+        )
 
     # Add orthophoto overlay
     tile_layer = TileLayer(
         url="http://localhost:8000/{z}/{x}/{y}.png",
-        # min_zoom=15,
-        # max_zoom=20,
+        min_zoom=15,
+        max_zoom=20,
+        show_loading=True,
+        max_requests_per_tile=5,  # Adjust as needed
         name="Region Image")
     m.add_layer(tile_layer)
+
+    # local_tiles = LocalTileLayer(
+    #     path='../tile_server/tiles/{z}/{x}/{y}.png',
+    #     min_zoom=15,
+    #     max_zoom=20,
+    #     name="Local Tile Region Image"
+    # )
+    # m.add(local_tiles)
+
+    # def tile_loaded(event):
+    #     print(f"Tile loaded: {event}")
+    # tile_layer.on_load(tile_loaded)
 
     # Add the region border to the map
     region_layer = GeoJSON(

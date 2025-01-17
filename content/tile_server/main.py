@@ -6,16 +6,34 @@ from rio_tiler.errors import TileOutsideBounds
 from PIL import Image
 import numpy as np
 import uvicorn
+import sys
 import logging
 
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Output to stdout
+    ]
+)
 logger = logging.getLogger(__name__)
+logger.info("Logging initialized.")
 
 app = FastAPI()
 
 # Path to your GeoTIFF
 GEOTIFF_PATH = 'tile_server/input/IGNORE_reprojected_region.tif'
 transparent_tile = "transparent_tile.png"
+oob_tile = "out_of_bounds_tile.png"
+
+# Manual re-color just to see
+img = Image.new("RGBA", (256, 256), (0, 0, 255, 180))
+img.save(transparent_tile)
+
+img = Image.new("RGBA", (256, 256), (255, 0, 0, 255))
+img.save(oob_tile)
+
+
 
 def generate_tiles(geo_tiff_path, output_dir, zoom_levels):
     """Generate tiles for a GeoTIFF."""
@@ -48,6 +66,7 @@ def generate_tiles(geo_tiff_path, output_dir, zoom_levels):
 async def tile(z: int, x: int, y: int):
     """Serve tiles from a local directory."""
     logger.info(f"Tile requested: z={z}, x={x}, y={y}")
+    sys.stdout.flush()  # Force flush
     
     try:
         tile_path = f"tile_server/tiles/{z}/{x}/{y}.png"
@@ -64,10 +83,10 @@ async def tile(z: int, x: int, y: int):
         
     except TileOutsideBounds:
         logger.warning(f"Tile outside bounds: z={z}, x={x}, y={y}")
-        if not os.path.exists(transparent_tile):
-            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-            img.save(transparent_tile)
-        return FileResponse(transparent_tile)
+        if not os.path.exists(oob_tile):
+            img = Image.new("RGBA", (256, 256), (255, 0, 0, 255))
+            img.save(oob_tile)
+        return FileResponse(oob_tile)
     
     except Exception as e:
         logger.error(f"Error generating tile: {e}")
