@@ -8,14 +8,14 @@ import numpy as np
 import uvicorn
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
 # Path to your GeoTIFF
-GEOTIFF_PATH = 'outputs/reprojected_region.tif'
-
+GEOTIFF_PATH = 'tile_server/input/IGNORE_reprojected_region.tif'
+transparent_tile = "transparent_tile.png"
 
 def generate_tiles(geo_tiff_path, output_dir, zoom_levels):
     """Generate tiles for a GeoTIFF."""
@@ -36,8 +36,10 @@ def generate_tiles(geo_tiff_path, output_dir, zoom_levels):
                     tile_path = os.path.join(output_dir, f"{z}/{tile.x}/{tile.y}.png")
                     os.makedirs(os.path.dirname(tile_path), exist_ok=True)
                     img.save(tile_path)
+
                 except TileOutsideBounds:
                     logger.warning(f"Tile {tile} at zoom level {z} is out of bounds.")
+                
                 except Exception as e:
                     logger.error(f"Error generating tile {tile}: {e}")
 
@@ -45,17 +47,34 @@ def generate_tiles(geo_tiff_path, output_dir, zoom_levels):
 @app.get("/{z}/{x}/{y}.png")
 async def tile(z: int, x: int, y: int):
     """Serve tiles from a local directory."""
-    tile_path = f"tiles/{z}/{x}/{y}.png"
-    if os.path.exists(tile_path):
-        return FileResponse(tile_path)
+    logger.info(f"Tile requested: z={z}, x={x}, y={y}")
+    
+    try:
+        tile_path = f"tile_server/tiles/{z}/{x}/{y}.png"
+        if os.path.exists(tile_path):
+            return FileResponse(tile_path)
 
-    # Serve a transparent tile if the requested tile is not found
-    logger.warning(f"Tile {z}/{x}/{y} not found.")
-    transparent_tile = "transparent_tile.png"
-    if not os.path.exists(transparent_tile):
-        img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))  # 256x256 transparent tile
-        img.save(transparent_tile)
-    return FileResponse(transparent_tile)
+        with COGReader(GEOTIFF_PATH) as cog:
+            tile_data, mask = cog.tile(x, y, z)
+            rgba = np.dstack((tile_data[0], tile_data[1], tile_data[2], mask)).astype(np.uint8)
+            img = Image.fromarray(rgba)
+            img.save(tile_path)
+            logger.info(f"Tile generated: {tile_path}")
+            return FileResponse(tile_path)
+        
+    except TileOutsideBounds:
+        logger.warning(f"Tile outside bounds: z={z}, x={x}, y={y}")
+        if not os.path.exists(transparent_tile):
+            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            img.save(transparent_tile)
+        return FileResponse(transparent_tile)
+    
+    except Exception as e:
+        logger.error(f"Error generating tile: {e}")
+        if not os.path.exists(transparent_tile):
+            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            img.save(transparent_tile)
+        return FileResponse(transparent_tile)
 
 
 def start_server():

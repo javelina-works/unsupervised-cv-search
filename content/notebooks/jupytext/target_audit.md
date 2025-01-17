@@ -71,6 +71,8 @@ def plot_route_on_image(region_geojson, micro_routes_filename):
     # Add orthophoto overlay
     tile_layer = TileLayer(
         url="http://localhost:8000/{z}/{x}/{y}.png",
+        # min_zoom=15,
+        # max_zoom=20,
         name="Region Image")
     m.add_layer(tile_layer)
 
@@ -87,7 +89,7 @@ def plot_route_on_image(region_geojson, micro_routes_filename):
         hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
         name=f'Micro Routes'
     )
-    m.add(routes_layer)
+    # m.add(routes_layer)
 
     m.add(LayersControl(position='topright'))
     m.add(ScaleControl(position='bottomleft'))
