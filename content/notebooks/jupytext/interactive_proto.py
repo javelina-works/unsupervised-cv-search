@@ -506,6 +506,19 @@ def save_routes_as_waypoints(micro_routes_gdf, output_dir):
 
 save_routes_as_waypoints(micro_routes_gdf, waypoints_files_dir)
 
+# ## Interactive Target Checking
+
+# +
+from macro_planning.image_tiling import (
+    reproject_to_crs, create_tile_server_in_notebook
+)
+
+reprojected_path = "'../outputs/reprojected_region.tif'"
+image_path = reproject_to_crs(region_image_path, reprojected_path)
+
+app = create_tile_server_in_notebook(image_path, port=8000)
+# -
+
 # ## Interactive Depot Map
 #
 # Select a depot using ipywidgets dropdown to see information relevant to the given depot.
