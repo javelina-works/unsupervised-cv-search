@@ -35,24 +35,31 @@ sys.path.append(str(Path.cwd().parent))
 ```
 
 ```python
+region_crs = 32613 # Use this everywhere for consistency
+visualization_crs = 4326 # Use this when we need leaflet visualizations
+
 region_contour_geojson = '../input/interactive_proto/region_contour.geojson'
 micro_routes_filename = '../input/interactive_proto/micro_routes.geojson'
+targets_plants_filename = '../input/interactive_proto/targets.geojson'
 ```
 
 ```python
 from ipyleaflet import (
-    Map, GeoJSON, LayersControl, ScaleControl, ImageOverlay, 
-    TileLayer, LocalTileLayer
+    Map, GeoJSON, LayersControl, ScaleControl, 
+    FullScreenControl, GeomanDrawControl,
+    TileLayer, LocalTileLayer, GeoData,
 )
 from ipyleaflet.projections import projections
+from ipywidgets import Layout
 
 from plant_search.load_image import load_image
 from shapely.geometry import shape
 import json
+import geopandas as gpd
 
 from ipyleaflet.projections import projections
 
-def plot_route_on_image(region_geojson, micro_routes_filename):
+def plot_route_on_image(region_geojson, micro_routes_filename, targets_plants_filename):
 
     # Get image data
     # image, transform, bounds, image_crs = load_image(orthophoto_path)
@@ -65,11 +72,25 @@ def plot_route_on_image(region_geojson, micro_routes_filename):
     with open(micro_routes_filename, "r") as f:
         micro_routes_data = json.load(f)
 
+    with open(targets_plants_filename, "r") as f:
+        targets_data = json.load(f)
+    
+    
+    
+    bboxes_gdf = gpd.read_file(targets_plants_filename) # Read in from file
+    bboxes_gdf['bounding_box'] = bboxes_gdf['bounding_box'].apply(loads) # str to Polygon
+    bboxes_gdf.set_geometry('bounding_box', inplace=True) # It is the primary geometry
+    bboxes_gdf = bboxes_gdf.drop(columns=['region_outline_version', 'geometry']) # remove confusing cols
+    bboxes_gdf = bboxes_gdf.set_crs(region_crs).to_crs(visualization_crs) # Needs CRS, then convert
 
     
+    # bounding_boxes_gdf = gpd.GeoDataFrame(bboxes_gdf, geometry='geometry', crs=bboxes_gdf.crs)
+    # bounding_boxes_geojson = bounding_boxes_gdf.to_json()
+
     # Set up the map
     m = Map(center=(region_center.y, region_center.x),
             zoom=16, scroll_wheel_zoom=True,
+            layout=Layout(height="700px"),  # Set desired dimensions
             # crs=projections.EPSG4326
         )
 
@@ -82,18 +103,6 @@ def plot_route_on_image(region_geojson, micro_routes_filename):
         max_requests_per_tile=5,  # Adjust as needed
         name="Region Image")
     m.add_layer(tile_layer)
-
-    # local_tiles = LocalTileLayer(
-    #     path='../tile_server/tiles/{z}/{x}/{y}.png',
-    #     min_zoom=15,
-    #     max_zoom=20,
-    #     name="Local Tile Region Image"
-    # )
-    # m.add(local_tiles)
-
-    # def tile_loaded(event):
-    #     print(f"Tile loaded: {event}")
-    # tile_layer.on_load(tile_loaded)
 
     # Add the region border to the map
     region_layer = GeoJSON(
@@ -110,10 +119,35 @@ def plot_route_on_image(region_geojson, micro_routes_filename):
     )
     # m.add(routes_layer)
 
+    targets_layer = GeoJSON(
+        data=targets_data,
+        style={'color': 'black', 'radius':3, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.6},
+        hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+        point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+        name=targets_data['name']
+    )
+    m.add(targets_layer)
+
+    bboxes_layer = GeoData(geo_dataframe = bboxes_gdf,
+                   style={'color': 'red', 'opacity':0.5, 'weight':1.9,
+                          'fillColor': 'red', 'fillOpacity': 0.2
+                          },
+                   hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
+                   name = 'Countries')
+    m.add(bboxes_layer)
+
+    draw_control = GeomanDrawControl()
+    draw_control.circlemarker = {}
+    draw_control.rotate = False
+    draw_control.cut = False
+    draw_control.drag = False
+    m.add(draw_control)
+
+    # m.add(FullScreenControl(position='topleft'))
     m.add(LayersControl(position='topright'))
     m.add(ScaleControl(position='bottomleft'))
     return m
 
-m = plot_route_on_image(region_contour_geojson, micro_routes_filename)
+m = plot_route_on_image(region_contour_geojson, micro_routes_filename, targets_plants_filename)
 m
 ```

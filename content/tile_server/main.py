@@ -27,10 +27,10 @@ transparent_tile = "transparent_tile.png"
 oob_tile = "out_of_bounds_tile.png"
 
 # Manual re-color just to see
-img = Image.new("RGBA", (256, 256), (0, 0, 255, 180))
+img = Image.new("RGBA", (256, 256), (255, 0, 0, 128))
 img.save(transparent_tile)
 
-img = Image.new("RGBA", (256, 256), (255, 0, 0, 255))
+img = Image.new("RGBA", (256, 256), (255, 0, 0, 0))
 img.save(oob_tile)
 
 
