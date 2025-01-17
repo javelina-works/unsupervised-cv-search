@@ -1,3 +1,11 @@
+
+# Manually ignore large Geotiff files
+IGNORE_*.tif
+IGNORE_*.tiff
+IGNORE*
+
+
+
 *.bundle.*
 lib/
 node_modules/

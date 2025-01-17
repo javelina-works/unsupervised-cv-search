@@ -1,5 +1,6 @@
 from rio_tiler.io import COGReader
 from rio_tiler.profiles import img_profiles
+from rio_tiler.errors import TileOutsideBounds
 import os
 from threading import Thread
 import rasterio
@@ -8,6 +9,9 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 import uvicorn
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def reproject_to_crs(input_path, output_path, target_crs="EPSG:4326"):
     """
@@ -55,29 +59,6 @@ def reproject_to_crs(input_path, output_path, target_crs="EPSG:4326"):
     return output_path
 
 
-
-def create_tile_server(geotiff_path, port=8000):
-    """
-    Create a tile server for the GeoTIFF using FastAPI.
-
-    Parameters:
-    - geotiff_path (str): Path to the reprojected GeoTIFF.
-    - port (int): Port to run the FastAPI server.
-    """
-    app = FastAPI()
-
-    @app.get("/{z}/{x}/{y}.png")
-    async def tile(z: int, x: int, y: int):
-        with COGReader(geotiff_path) as cog:
-            tile_data, _ = cog.tile(x, y, z)
-            tile_path = f"tile_{z}_{x}_{y}.png"
-            cog.write_tile(tile_data, tile_path, img_format="png", profile=img_profiles["png"])
-            return FileResponse(tile_path)
-
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
-
-
 def start_tile_server(app, host="0.0.0.0", port=8000):
     """
     Start a FastAPI tile server in a separate thread.
@@ -106,13 +87,59 @@ def create_tile_server_in_notebook(geotiff_path):
 
     @app.get("/{z}/{x}/{y}.png")
     async def tile(z: int, x: int, y: int):
-        with COGReader(geotiff_path) as cog:
-            tile_data, _ = cog.tile(x, y, z)
-            tile_path = f"tile_{z}_{x}_{y}.png"
-            cog.write_tile(tile_data, tile_path, img_format="png", profile=img_profiles["png"])
-            return FileResponse(tile_path)
+        try:
+            with COGReader(geotiff_path) as cog:
+                tile_data, _ = cog.tile(x, y, z)
+                tile_path = f"tile_{z}_{x}_{y}.png"
+                cog.write_tile(tile_data, tile_path, img_format="png", profile=img_profiles["png"])
+                return FileResponse(tile_path)
+            
+        except TileOutsideBounds:
+            # Create a transparent PNG for out-of-bounds tiles
+            transparent_tile = "transparent_tile.png"
+            if not os.path.exists(transparent_tile):
+                from PIL import Image
+                img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))  # 256x256 transparent tile
+                img.save(transparent_tile)
+            return FileResponse(transparent_tile)
+        
+        except Exception as e:
+            logger.error(f"Error generating tile: {e}")
+            raise
 
-    start_tile_server(app, port=8000)
+    return app
+
+def create_tile_server(geotiff_path, port=8000):
+    """
+    Create a tile server for the GeoTIFF using FastAPI.
+
+    Parameters:
+    - geotiff_path (str): Path to the reprojected GeoTIFF.
+    - port (int): Port to run the FastAPI server.
+    """
+    app = FastAPI()
+
+    @app.get("/{z}/{x}/{y}.png")
+    async def tile(z: int, x: int, y: int):
+        try:
+            with COGReader(geotiff_path) as cog:
+                tile_data, _ = cog.tile(x, y, z)
+                tile_path = f"tile_{z}_{x}_{y}.png"
+                cog.write_tile(tile_data, tile_path, img_format="png", profile=img_profiles["png"])
+                return FileResponse(tile_path)
+        except TileOutsideBounds:
+            # Create a transparent PNG for out-of-bounds tiles
+            transparent_tile = "transparent_tile.png"
+            if not os.path.exists(transparent_tile):
+                from PIL import Image
+                img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))  # 256x256 transparent tile
+                img.save(transparent_tile)
+            return FileResponse(transparent_tile)
+        except Exception as e:
+            logger.error(f"Error generating tile: {e}")
+            raise
+
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 def tile_and_serve_geotiff(input_geotiff, port=8000):

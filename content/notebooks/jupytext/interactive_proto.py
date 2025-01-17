@@ -504,20 +504,31 @@ def save_routes_as_waypoints(micro_routes_gdf, output_dir):
 
 # -
 
-save_routes_as_waypoints(micro_routes_gdf, waypoints_files_dir)
+# #### Only run when we want to generate new waypoint files
+
+# +
+# save_routes_as_waypoints(micro_routes_gdf, waypoints_files_dir)
+# -
 
 # ## Interactive Target Checking
 
 # +
 from macro_planning.image_tiling import (
-    reproject_to_crs, create_tile_server_in_notebook
+    reproject_to_crs, 
+    create_tile_server_in_notebook,
+    start_tile_server
 )
 
-reprojected_path = "'../outputs/reprojected_region.tif'"
-image_path = reproject_to_crs(region_image_path, reprojected_path)
+reprojected_path = '../outputs/reprojected_region.tif'
+# image_path = reproject_to_crs(region_image_path, reprojected_path, visualization_crs)
 
-app = create_tile_server_in_notebook(image_path, port=8000)
+# app = create_tile_server_in_notebook(image_path)
+# start_tile_server(app, host="0.0.0.0", port=8000)
 # -
+
+with rasterio.open(reprojected_path) as src:
+    print(f"CRS: {src.crs}")
+    print(f"Bounds: {src.bounds}")
 
 # ## Interactive Depot Map
 #
@@ -536,23 +547,8 @@ interactive_map = display_interactive_map(
 interactive_map
 
 # +
-from plant_search.load_image import load_image
-from rasterio.crs import CRS
-
-image, transform, bounds, image_crs = load_image(region_image_path)
-
-# Define your CRS
-crs = CRS.from_wkt(image_crs.to_wkt())
-
-# Convert to a dictionary
-crs_dict = crs.to_dict()
-
-# Print the dictionary
-print(crs_dict)
-
-# +
 from ipyleaflet import (
-    Map, GeoJSON, LayersControl, ScaleControl, ImageOverlay
+    Map, GeoJSON, LayersControl, ScaleControl, ImageOverlay, TileLayer
 )
 from plant_search.load_image import load_image
 from shapely.geometry import shape
@@ -560,10 +556,10 @@ import json
 
 from ipyleaflet.projections import projections
 
-def plot_route_on_image(region_geojson, micro_routes_filename, orthophoto_path=None):
+def plot_route_on_image(region_geojson, micro_routes_filename):
 
     # Get image data
-    image, transform, bounds, image_crs = load_image(orthophoto_path)
+    # image, transform, bounds, image_crs = load_image(orthophoto_path)
 
     with open(region_geojson, "r") as f:
         region_contour_data = json.load(f)
@@ -574,27 +570,14 @@ def plot_route_on_image(region_geojson, micro_routes_filename, orthophoto_path=N
         micro_routes_data = json.load(f)
 
 
-    custom_crs = {
-        'proj': 'utm',
-        'zone': 13,
-        'datum': 'WGS84',
-        'units': 'm',
-        'lat_0': 0,
-        'lon_0': -105,
-        'k': 0.9996,
-        'x_0': 500000,
-        'y_0': 0,
-        'ellps': 'WGS84',
-        'no_defs': True
-    }
     
-
+    # Set up the map
     m = Map(center=(region_center.y, region_center.x),
-            zoom=16, scroll_wheel_zoom=True, crs=projections.EPSG4326)
+            zoom=16, scroll_wheel_zoom=True)
 
     # Add orthophoto overlay
-    overlay = ImageOverlay(url=orthophoto_path, bounds=bounds)
-    m.add(overlay)
+    tile_layer = TileLayer(url="http://localhost:8000/{z}/{x}/{y}.png")
+    m.add_layer(tile_layer)
 
     # Add the region border to the map
     region_layer = GeoJSON(
@@ -615,8 +598,12 @@ def plot_route_on_image(region_geojson, micro_routes_filename, orthophoto_path=N
     m.add(ScaleControl(position='bottomleft'))
     return m
 
-m = plot_route_on_image(region_contour_geojson, micro_routes_filename, region_image_path)
+m = plot_route_on_image(region_contour_geojson, micro_routes_filename)
 m
+# -
+
+m.crs
+m.bounds
 
 # +
 from plant_search.load_image import load_image
