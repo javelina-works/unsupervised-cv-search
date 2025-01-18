@@ -95,6 +95,7 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
     # Set up the map
     m = Map(center=(region_center.y, region_center.x),
             zoom=16, scroll_wheel_zoom=True,
+            double_click_zoom=False,
             layout=Layout(height="700px"),  # Set desired dimensions
             # crs=projections.EPSG4326
         )
@@ -121,6 +122,7 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
         style={'color': 'black', 'radius':10, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
         hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
         point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+        draggable=True,
         name=depot_data['name']
     )
     m.add(depot_points)
@@ -131,16 +133,32 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
         hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
         name=f'Micro Routes'
     )
-    m.add(routes_layer)
+    # m.add(routes_layer)
 
     targets_layer = GeoJSON(
         data=targets_data,
-        style={'color': 'black', 'radius':3, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.6},
+        style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.6},
         hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
         point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+        draggable=True,
         name=targets_data['name']
     )
-    # m.add(targets_layer)
+    def on_click_target(event, feature, properties):
+        # print(event)
+        print(feature)
+        print(properties)
+        print(len(targets_data['features']))
+        targets_data['features'] = [
+            feature for feature in targets_data['features']
+            if feature['properties']['target_id'] != properties['target_id']
+        ]
+        print(len(targets_data['features']))
+        targets_layer.data = targets_data
+
+    targets_layer.on_click(on_click_target)
+
+
+    m.add(targets_layer)
 
     bboxes_layer = GeoData(geo_dataframe = bboxes_gdf,
                    style={'color': 'red', 'opacity':0.5, 'weight':1.9,
@@ -148,12 +166,12 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
                           },
                    hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
                    name = 'Countries')
-    m.add(bboxes_layer)
+    # m.add(bboxes_layer)
 
     draw_control = GeomanDrawControl()
     draw_control.circlemarker = {}
     draw_control.rotate = False
-    draw_control.cut = False
+    # draw_control.cut = False
     draw_control.drag = False
     m.add(draw_control)
 
@@ -164,4 +182,10 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
 
 m = plot_route_on_image(region_contour_geojson, depots_filename, micro_routes_filename, targets_plants_filename)
 m
+```
+
+```python
+with open(targets_plants_filename, "r") as f:
+    targets_data = json.load(f)
+print(targets_data['features'])    
 ```
