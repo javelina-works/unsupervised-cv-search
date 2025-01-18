@@ -226,6 +226,7 @@ from ipyleaflet import (
 )
 from ipywidgets import Button, IntSlider
 import json
+import pandas as pd
 from shapely.geometry import shape
 from plant_search.verify_targets import get_image_sample_coordinates
 
@@ -280,7 +281,7 @@ def sample_region_map(region_image_path, region_geojson=None):
     # Add layer of image samples
     samples_layer = GeoData(geo_dataframe = sample_boxes_gpd,
                    style={'color': 'blue', 'weight':2, 'fillOpacity': 0.05 },
-                   hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
+                   hover_style={'color': 'red' , 'opacity': 1.0, },
                    name = 'Random Samples')
     m.add(samples_layer)
 
@@ -320,6 +321,40 @@ def sample_region_map(region_image_path, region_geojson=None):
     samples_slider.observe(on_count_change, names='value')  # Trigger on value change
     m.add(WidgetControl(widget=samples_slider, position='bottomright'))
 
+    # Save current samples
+    save_button = Button(
+        description="Save Samples",  # Button label
+        tooltip="Save all samples for testing",  # Tooltip text
+        icon="check"  # Optional icon (FontAwesome class, e.g., 'check', 'close')
+    )
+    def save_combined_features(change):
+        # Collect drawn features from the map
+        print(type(draw_control.data))
+        print(len(draw_control.data))
+        drawn_features = draw_control.data["features"]
+        print(f"drawn: {drawn_features}")
+        if not drawn_features:
+            print("No drawn features.")
+            return
+
+        # Convert drawn features to GeoDataFrame
+        drawn_geometries = [shape(feature["geometry"]) for feature in drawn_features]
+        drawn_gdf = gpd.GeoDataFrame(geometry=drawn_geometries, crs="EPSG:4326")
+
+        programmatic_gdf = samples_layer.geo_dataframe # Get random rectangles
+
+        # Combine the two GeoDataFrames
+        combined_gdf = gpd.GeoDataFrame(pd.concat([drawn_gdf, programmatic_gdf], ignore_index=True))
+        print(combined_gdf)
+
+        # Save to GeoJSON
+        # output_file = "combined_features.geojson"
+        # combined_gdf.to_file(output_file, driver="GeoJSON")
+        # print(f"Combined features saved to {output_file}.")
+    save_button.on_click(save_combined_features)
+
+    m.add(WidgetControl(widget=save_button, position='bottomright'))
+
 
     # Add conventional controls
     draw_control = GeomanDrawControl()
@@ -336,6 +371,15 @@ def sample_region_map(region_image_path, region_geojson=None):
     draw_control.rotate = False
     draw_control.cut = False
     draw_control.edit = False
+
+    def handle_draw(self, action, geo_json):
+        print(action)
+        # print(geo_json)
+        # print(f"New feature drawn: {event}")
+        # print(f"Current drawn features: {draw_control.data}")
+
+    draw_control.on_draw(handle_draw)
+
     m.add(draw_control)
 
     # m.add(FullScreenControl(position='topleft'))
@@ -343,10 +387,13 @@ def sample_region_map(region_image_path, region_geojson=None):
     m.add(ScaleControl(position='bottomleft'))
 
     return m
-# -
 
+# +
 sample_map = sample_region_map(region_image_path, region_contour_geojson)
 sample_map
+
+# sample_map.layers
+# -
 
 # ## 3. Audit Target Results
 
@@ -450,9 +497,9 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
     )
     def on_click_target(event, feature, properties):
         # print(event)
-        print(feature)
-        print(properties)
-        print(len(targets_data['features']))
+        # print(feature)
+        # print(properties)
+        # print(len(targets_data['features']))
         targets_data['features'] = [
             feature for feature in targets_data['features']
             if feature['properties']['target_id'] != properties['target_id']
