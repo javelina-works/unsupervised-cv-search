@@ -228,31 +228,37 @@ from ipywidgets import Button, IntSlider
 import json
 import pandas as pd
 from shapely.geometry import shape
+from shapely.ops import transform
 from plant_search.verify_targets import get_image_sample_coordinates
 
-def sample_region_map(region_image_path, region_geojson=None):
+def sample_region_map(region_image_path, region_geojson=None, container=None):
     """
-    Create a map with rectangles showing the sample locations.
+    Create an interactive map and update the container with the combined GeoDataFrame.
 
     Parameters:
-        image_path (str): Path to the orthophoto image.
-        sample_boxes (list): List of bounding box coordinates (top_left, bottom_right).
-        crs (str): Coordinate reference system of the image.
-    """    
+        region_image_path (str): Path to the orthophoto image.
+        region_geojson (str): Path to the GeoJSON file defining the region.
+        container (dict): A mutable container to hold the combined GeoDataFrame reference.
+
+    Returns:
+        Map: An ipyleaflet map instance.
+    """   
     # Initialize data for interaction
     sample_size = 512
     num_samples = 10
-    sample_boxes_gpd = get_image_sample_coordinates(
+    sample_boxes_gdf = get_image_sample_coordinates(
         region_image_path, sample_size, num_samples, region_geojson
     )
+
+    # Placeholder for combined GeoDataFrame
+    if container is not None:
+        container['combined_gdf'] = sample_boxes_gdf.copy()
 
     # Intitialize layers data
     with open(region_geojson, "r") as f:
         region_contour_data = json.load(f)
     region_geometry = shape(region_contour_data['features'][0]['geometry'])
     region_center = region_geometry.centroid
-    
-
 
     # Initialize the map centered on the image
     m = Map(center=(region_center.y, region_center.x), 
@@ -286,7 +292,7 @@ def sample_region_map(region_image_path, region_geojson=None):
     m.add(samples_layer)
 
 
-
+    print(samples_layer.data)
 
     # Add interactive widget controls
     # Regenerate random samples
@@ -312,14 +318,18 @@ def sample_region_map(region_image_path, region_geojson=None):
         continuous_update=False  # Update only on release
     )
     def on_count_change(change):
+        nonlocal num_samples # Ensure update of function variable
+
         new_sample_count = change['new']
         sample_boxes_gpd = get_image_sample_coordinates(
             region_image_path, sample_size, new_sample_count, region_geojson
         )
+        num_samples = new_sample_count # Update function counter
         samples_layer.geo_dataframe = sample_boxes_gpd # refresh map layer
 
     samples_slider.observe(on_count_change, names='value')  # Trigger on value change
     m.add(WidgetControl(widget=samples_slider, position='bottomright'))
+
 
     # Save current samples
     save_button = Button(
@@ -328,24 +338,32 @@ def sample_region_map(region_image_path, region_geojson=None):
         icon="check"  # Optional icon (FontAwesome class, e.g., 'check', 'close')
     )
     def save_combined_features(change):
-        # Collect drawn features from the map
-        print(type(draw_control.data))
-        print(len(draw_control.data))
-        drawn_features = draw_control.data["features"]
-        print(f"drawn: {drawn_features}")
-        if not drawn_features:
-            print("No drawn features.")
+        nonlocal container
+        
+        # Ensure `draw_control.data` is iterable and extract features
+        drawn_geometries = []
+        if isinstance(draw_control.data, list):  # Check if data is a list
+            for item in draw_control.data:
+                if "geometry" in item:  # Ensure item contains geometry
+                    drawn_geometries.append(shape(item["geometry"]))
+        else:
+            print("Draw control data is not iterable or does not contain valid features.")
             return
 
-        # Convert drawn features to GeoDataFrame
-        drawn_geometries = [shape(feature["geometry"]) for feature in drawn_features]
-        drawn_gdf = gpd.GeoDataFrame(geometry=drawn_geometries, crs="EPSG:4326")
+        # Convert the drawn geometries to a GeoDataFrame
+        if drawn_geometries:
+            drawn_gdf = gpd.GeoDataFrame(geometry=drawn_geometries, crs="EPSG:4326")
+        else:
+            drawn_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
-        programmatic_gdf = samples_layer.geo_dataframe # Get random rectangles
 
         # Combine the two GeoDataFrames
+        programmatic_gdf = samples_layer.geo_dataframe # Get random rectangles
         combined_gdf = gpd.GeoDataFrame(pd.concat([drawn_gdf, programmatic_gdf], ignore_index=True))
-        print(combined_gdf)
+
+        # Update the container
+        if container is not None:
+            container['combined_gdf'] = combined_gdf
 
         # Save to GeoJSON
         # output_file = "combined_features.geojson"
@@ -374,9 +392,38 @@ def sample_region_map(region_image_path, region_geojson=None):
 
     def handle_draw(self, action, geo_json):
         print(action)
-        # print(geo_json)
+        print(geo_json)
         # print(f"New feature drawn: {event}")
         # print(f"Current drawn features: {draw_control.data}")
+
+        nonlocal container
+        
+        # Define precision for rounding
+        precision = 6
+
+        def round_geometry(geometry, precision):
+            """Round geometry coordinates to a specified precision."""
+            return transform(lambda x, y: (round(x, precision), round(y, precision)), geometry)
+
+        if action == "remove":
+            # Extract the geometry of the deleted feature
+            geo_json_geom = shape(geo_json[0]["geometry"])
+            deleted_geometry = round_geometry(geo_json_geom, precision)
+            
+            # Remove matching features from the GeoDataFrame
+            if container and "combined_gdf" in container:
+                samples_layer.geo_dataframe = samples_layer.geo_dataframe[
+                    ~samples_layer.geo_dataframe.geometry.apply(
+                        lambda geom: round_geometry(geom, precision).equals(deleted_geometry)
+                        )
+                ]
+                # print("Updated Combined GeoDataFrame after deletion:")
+                # print(len(samples_layer.geo_dataframe))
+                
+        elif action == "drag":
+            print("Feature dragged.")
+        elif action == "created":
+            print("Feature created.")
 
     draw_control.on_draw(handle_draw)
 
@@ -389,10 +436,18 @@ def sample_region_map(region_image_path, region_geojson=None):
     return m
 
 # +
-sample_map = sample_region_map(region_image_path, region_contour_geojson)
+combined_samples_container = {}
+
+sample_map = sample_region_map(region_image_path, region_contour_geojson, combined_samples_container)
 sample_map
 
 # sample_map.layers
+
+# +
+# TODO: drag is not working as hoped
+
+print(len(combined_samples_container['combined_gdf']))
+print(combined_samples_container['combined_gdf'])
 # -
 
 # ## 3. Audit Target Results
