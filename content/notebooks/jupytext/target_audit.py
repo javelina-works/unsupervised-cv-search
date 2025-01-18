@@ -121,15 +121,12 @@ plot_samples(samples)
 
 
 # +
-import json
-from shapely.geometry import shape
 from ipyleaflet import (
     GeoData, GeoJSON, Map, Rectangle, TileLayer, 
     ScaleControl, GeomanDrawControl, LayersControl
 )
-from plant_search.verify_targets import get_image_sample_coordinates
-
-
+import json
+from shapely.geometry import shape
 
 
 def create_map(region_geojson, sample_boxes):
@@ -157,7 +154,7 @@ def create_map(region_geojson, sample_boxes):
     # Add the region border to the map
     region_layer = GeoJSON(
         data=region_contour_data, 
-        style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+        style={'color': 'blue', 'fill': False, 'fillOpacity': 0.05, 'weight': 2},
         name=region_contour_data['name'])
     m.add(region_layer)
 
@@ -171,17 +168,7 @@ def create_map(region_geojson, sample_boxes):
         name="Region Image")
     m.add(tile_layer)
 
-    # # Add rectangles for each sample box
-    # for box in sample_boxes:
-    #     top_left, bottom_right = box
-    #     rect = Rectangle(
-    #         bounds=[[top_left[1], top_left[0]], [bottom_right[1], bottom_right[0]]],
-    #         color="blue",
-    #         fill_opacity=0.2,
-    #         weight=2
-    #     )
-    #     m.add_layer(rect)
-
+    # Add layer of image samples
     samples_layer = GeoData(geo_dataframe = sample_boxes,
                    style={'color': 'blue', 'weight':2,
                           'fill': False, 'fillColor': 'red', 'fillOpacity': 0.2
@@ -192,9 +179,18 @@ def create_map(region_geojson, sample_boxes):
 
     draw_control = GeomanDrawControl()
     draw_control.circlemarker = {}
+    draw_control.polygon = {}
+    draw_control.polyline = {}
+    draw_control.rectangle = {
+        "pathOptions": {
+            "weight": 2,
+            "color": "green",
+            "fillOpacity": 0.1
+        }
+    }
     draw_control.rotate = False
-    # draw_control.cut = False
-    draw_control.drag = False
+    draw_control.cut = False
+    # draw_control.drag = False
     m.add(draw_control)
 
     # m.add(FullScreenControl(position='topleft'))
@@ -203,11 +199,14 @@ def create_map(region_geojson, sample_boxes):
 
     return m
 
-# Example Usage
-# image_path = "path_to_large_image.tif"  # Replace with your image file path
+# +
+from plant_search.verify_targets import get_image_sample_coordinates
+
+# Usage of functions
 sample_size = 512
 num_samples = 10
 
+# sample_boxes_gpd = get_image_sample_coordinates(region_image_path) # No region contour passed
 sample_boxes_gpd = get_image_sample_coordinates(
     region_image_path, 
     sample_size, 
@@ -215,13 +214,139 @@ sample_boxes_gpd = get_image_sample_coordinates(
     region_contour_geojson
 )
 
-# Create the map
 sample_map = create_map(region_contour_geojson, sample_boxes_gpd)
 sample_map
 
+# sample_boxes_gpd
+
+# +
+from ipyleaflet import (
+    GeoData, GeoJSON, Map, Rectangle, TileLayer, 
+    ScaleControl, GeomanDrawControl, LayersControl, WidgetControl
+)
+from ipywidgets import Button, IntSlider
+import json
+from shapely.geometry import shape
+from plant_search.verify_targets import get_image_sample_coordinates
+
+def sample_region_map(region_image_path, region_geojson=None):
+    """
+    Create a map with rectangles showing the sample locations.
+
+    Parameters:
+        image_path (str): Path to the orthophoto image.
+        sample_boxes (list): List of bounding box coordinates (top_left, bottom_right).
+        crs (str): Coordinate reference system of the image.
+    """    
+    # Initialize data for interaction
+    sample_size = 512
+    num_samples = 10
+    sample_boxes_gpd = get_image_sample_coordinates(
+        region_image_path, sample_size, num_samples, region_geojson
+    )
+
+    # Intitialize layers data
+    with open(region_geojson, "r") as f:
+        region_contour_data = json.load(f)
+    region_geometry = shape(region_contour_data['features'][0]['geometry'])
+    region_center = region_geometry.centroid
+    
+
+
+    # Initialize the map centered on the image
+    m = Map(center=(region_center.y, region_center.x), 
+            zoom=16, scroll_wheel_zoom=True,
+            double_click_zoom=False,
+            # crs=projections.EPSG4326,
+        )
+
+    # Add the region border to the map
+    region_layer = GeoJSON(
+        data=region_contour_data, 
+        style={'color': 'blue', 'fill': False, 'fillOpacity': 0.05, 'weight': 2},
+        name=region_contour_data['name'])
+    m.add(region_layer)
+
+    # Add orthophoto overlay
+    tile_layer = TileLayer(
+        url="http://localhost:8000/{z}/{x}/{y}.png",
+        min_zoom=15,
+        max_zoom=22,
+        show_loading=True,
+        max_requests_per_tile=5,  # Adjust as needed
+        name="Region Image")
+    m.add(tile_layer)
+
+    # Add layer of image samples
+    samples_layer = GeoData(geo_dataframe = sample_boxes_gpd,
+                   style={'color': 'blue', 'weight':2, 'fillOpacity': 0.05 },
+                   hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
+                   name = 'Random Samples')
+    m.add(samples_layer)
+
+
+
+
+    # Add interactive widget controls
+    # Regenerate random samples
+    resample_button = Button(
+        description="Resample Image",  # Button label
+        tooltip="Get new random samples of region",  # Tooltip text
+        icon="check"  # Optional icon (FontAwesome class, e.g., 'check', 'close')
+    )
+    def on_resample_click(change):
+        sample_boxes_gpd = get_image_sample_coordinates(
+            region_image_path, sample_size, num_samples, region_geojson
+        )
+        samples_layer.geo_dataframe = sample_boxes_gpd # refresh map layer
+
+    resample_button.on_click(on_resample_click)
+    m.add(WidgetControl(widget=resample_button, position='bottomright'))
+    
+
+    # Change number of samples
+    samples_slider = IntSlider(
+        value=num_samples, min=4, max=20, step=1,
+        description="Count:",
+        continuous_update=False  # Update only on release
+    )
+    def on_count_change(change):
+        new_sample_count = change['new']
+        sample_boxes_gpd = get_image_sample_coordinates(
+            region_image_path, sample_size, new_sample_count, region_geojson
+        )
+        samples_layer.geo_dataframe = sample_boxes_gpd # refresh map layer
+
+    samples_slider.observe(on_count_change, names='value')  # Trigger on value change
+    m.add(WidgetControl(widget=samples_slider, position='bottomright'))
+
+
+    # Add conventional controls
+    draw_control = GeomanDrawControl()
+    draw_control.circlemarker = {}
+    draw_control.polygon = {}
+    draw_control.polyline = {}
+    draw_control.rectangle = {
+        "pathOptions": {
+            "weight": 2,
+            "color": "green",
+            "fillOpacity": 0.1
+        }
+    }
+    draw_control.rotate = False
+    draw_control.cut = False
+    draw_control.edit = False
+    m.add(draw_control)
+
+    # m.add(FullScreenControl(position='topleft'))
+    m.add(LayersControl(position='topright'))
+    m.add(ScaleControl(position='bottomleft'))
+
+    return m
 # -
 
-sample_boxes_gpd
+sample_map = sample_region_map(region_image_path, region_contour_geojson)
+sample_map
 
 # ## 3. Audit Target Results
 

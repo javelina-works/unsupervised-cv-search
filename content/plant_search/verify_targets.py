@@ -53,6 +53,7 @@ def get_image_sample_coordinates(image_path: str,
     Returns:
         gpd.GeoDataFrame: GeoDataFrame containing sample bounding boxes.
     """
+    region_polygon = None
 
     # Samples must be within region, if provided
     if region_geojson:
@@ -91,20 +92,11 @@ def get_image_sample_coordinates(image_path: str,
                 transform, y + sample_size, x + sample_size, offset="lr"
             )
 
-            # Create a bounding box for the sample
-            # sample_box = Polygon([
-            #     (top_left_lon, top_left_lat),
-            #     (bottom_right_lon, top_left_lat),
-            #     (bottom_right_lon, bottom_right_lat),
-            #     (top_left_lon, bottom_right_lat),
-            #     (top_left_lon, top_left_lat)
-            # ])
+            # Setup correct GDF geometry for boxes
             sample_box = box(top_left_lon, bottom_right_lat, bottom_right_lon, top_left_lat)
-
 
             # Check if the sample box is fully within the polygon (if available)
             if not region_polygon or (region_polygon and region_polygon.contains(sample_box)):
-                # samples.append(((top_left_lon, top_left_lat), (bottom_right_lon, bottom_right_lat)))
                 samples.append(sample_box)
 
             attempts += 1
