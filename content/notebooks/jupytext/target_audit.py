@@ -44,7 +44,9 @@ sys.path.append(str(Path.cwd().parent))
 region_crs = 32613 # Use this everywhere for consistency
 visualization_crs = 4326 # Use this when we need leaflet visualizations
 
-region_image_path = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
+# region_image_path = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
+region_image_path = '../tile_server/input/IGNORE_reprojected_region.tif'
+
 region_contour_geojson = '../input/interactive_proto/region_contour.geojson'
 micro_routes_filename = '../input/interactive_proto/micro_routes.geojson'
 targets_plants_filename = '../input/interactive_proto/targets.geojson'
@@ -117,7 +119,213 @@ num_samples = 10
 samples = get_random_samples(region_image_path, sample_size, num_samples)
 plot_samples(samples)
 
+
+# +
+import json 
+
+def load_geojson(file_path):
+    """
+    Load a GeoJSON file and extract the first polygon geometry.
+
+    Parameters:
+        file_path (str): Path to the GeoJSON file.
+    
+    Returns:
+        dict: A GeoJSON Feature with a 'geometry' key.
+    """
+    with open(file_path, "r") as f:
+        geojson_data = json.load(f)
+    
+    # If it's a FeatureCollection, extract the first feature
+    if geojson_data["type"] == "FeatureCollection":
+        feature = geojson_data["features"][0]  # Use the first feature
+    elif geojson_data["type"] == "Feature":
+        feature = geojson_data  # It's already a single feature
+    else:
+        raise ValueError("Unsupported GeoJSON structure: 'Feature' or 'FeatureCollection' expected.")
+    
+    # Check for 'geometry' key
+    if "geometry" not in feature:
+        raise KeyError("The GeoJSON feature does not contain a 'geometry' key.")
+    
+    return feature
+
+
+# +
+import random
+import rasterio
+from rasterio.transform import from_bounds
+from ipyleaflet.projections import projections
+from ipyleaflet import Map, Rectangle, TileLayer
+from pyproj import Transformer
+import json
+
+
+def get_random_sample_coordinates(image_path, sample_size, num_samples):
+    """
+    Get random sample coordinates from an orthophoto.
+
+    Parameters:
+        image_path (str): Path to the orthophoto image.
+        sample_size (int): Size of the square samples (e.g., 512 for 512x512).
+        num_samples (int): Number of random samples to extract.
+
+    Returns:
+        List of bounding boxes for samples in geographical coordinates.
+    """
+    with rasterio.open(image_path) as src:
+        width, height = src.width, src.height
+        transform = src.transform
+        crs = src.crs.to_string()
+
+        samples = []
+        for _ in range(num_samples):
+            # Random top-left corner in pixel coordinates
+            x = random.randint(0, width - sample_size)
+            y = random.randint(0, height - sample_size)
+            
+            # Convert pixel coordinates to geographical coordinates
+            top_left = rasterio.transform.xy(transform, y, x, offset="ul")
+            bottom_right = rasterio.transform.xy(transform, y + sample_size, x + sample_size, offset="lr")
+            samples.append((top_left, bottom_right))
+    
+    return samples, crs
+
+import random
+import rasterio
+from rasterio.transform import rowcol
+from shapely.geometry import shape, Point, Polygon
+
+def get_random_sample_coordinates_within_polygon(image_path, sample_size, num_samples, geojson_polygon):
+    """
+    Get random sample coordinates within a GeoJSON polygon from an orthophoto.
+
+    Parameters:
+        image_path (str): Path to the orthophoto image.
+        sample_size (int): Size of the square samples (e.g., 512 for 512x512).
+        num_samples (int): Number of random samples to extract.
+        geojson_polygon (dict): GeoJSON polygon defining the region of interest.
+
+    Returns:
+        List of bounding boxes for samples in geographical coordinates.
+    """
+    with rasterio.open(image_path) as src:
+        # Read the raster's transform and bounds
+        transform = src.transform
+        width, height = src.width, src.height
+
+        # Convert GeoJSON polygon to shapely geometry
+        polygon = shape(geojson_polygon["geometry"])
+
+        # Collect valid samples
+        samples = []
+        attempts = 0
+        max_attempts = num_samples * 10  # Limit to avoid infinite loops
+        
+        while len(samples) < num_samples and attempts < max_attempts:
+            # Generate a random top-left corner in pixel coordinates
+            x = random.randint(0, width - sample_size)
+            y = random.randint(0, height - sample_size)
+
+            # Convert top-left corner to geographic coordinates
+            top_left_lon, top_left_lat = rasterio.transform.xy(transform, y, x, offset="ul")
+            bottom_right_lon, bottom_right_lat = rasterio.transform.xy(
+                transform, y + sample_size, x + sample_size, offset="lr"
+            )
+
+            # Create a bounding box for the sample
+            sample_box = Polygon([
+                (top_left_lon, top_left_lat),
+                (bottom_right_lon, top_left_lat),
+                (bottom_right_lon, bottom_right_lat),
+                (top_left_lon, bottom_right_lat),
+                (top_left_lon, top_left_lat)
+            ])
+
+            # Check if the sample box is fully within the polygon
+            if polygon.contains(sample_box):
+                samples.append(((top_left_lon, top_left_lat), (bottom_right_lon, bottom_right_lat)))
+            
+            attempts += 1
+
+        if attempts >= max_attempts:
+            print(f"Warning: Only {len(samples)} samples generated within the polygon after {max_attempts} attempts.")
+
+    return samples
+
+
+def create_map(image_path, sample_boxes, crs):
+    """
+    Create a map with rectangles showing the sample locations.
+
+    Parameters:
+        image_path (str): Path to the orthophoto image.
+        sample_boxes (list): List of bounding box coordinates (top_left, bottom_right).
+        crs (str): Coordinate reference system of the image.
+    """
+
+    
+    
+    # Initialize the map centered on the image
+    center_lat = (bounds.top + bounds.bottom) / 2
+    center_lon = (bounds.left + bounds.right) / 2
+    m = Map(center=(center_lat, center_lon), 
+            zoom=16, scroll_wheel_zoom=True,
+            double_click_zoom=False,
+            # crs=projections.EPSG4326,
+        )
+
+    # Add orthophoto overlay
+    tile_layer = TileLayer(
+        url="http://localhost:8000/{z}/{x}/{y}.png",
+        min_zoom=15,
+        max_zoom=22,
+        show_loading=True,
+        max_requests_per_tile=5,  # Adjust as needed
+        name="Region Image")
+    m.add_layer(tile_layer)
+
+    # Add rectangles for each sample box
+    for box in sample_boxes:
+        top_left, bottom_right = box
+        rect = Rectangle(
+            bounds=[[top_left[1], top_left[0]], [bottom_right[1], bottom_right[0]]],
+            color="blue",
+            fill_opacity=0.2,
+            weight=2
+        )
+        m.add_layer(rect)
+
+    return m
+
+# Example Usage
+# image_path = "path_to_large_image.tif"  # Replace with your image file path
+sample_size = 512
+num_samples = 10
+
+
+
+# Get sample coordinates
+# sample_boxes, crs = get_random_sample_coordinates(region_image_path, sample_size, num_samples)
+
+
+region_contour = load_geojson(region_contour_geojson)
+sample_boxes = get_random_sample_coordinates_within_polygon(region_image_path, sample_size, num_samples, region_contour)
+
+
+with rasterio.open(region_image_path) as src:
+    bounds = src.bounds  # Get image bounds
+    crs = src.crs
+    print(bounds)
+
+
+# Create the map
+sample_map = create_map(region_image_path, sample_boxes, crs)
+sample_map
+
 # -
+
+region_contour.dtypes
 
 # ## 3. Audit Target Results
 
