@@ -25,6 +25,14 @@
 
 # # Target Auditing
 #
+# In this notebook, we will perform and validate a search of target plants using computer vision. These tools will help an operator quickly tune the search parameters and manually clean up the results.
+#
+# 1. **Sample images**: we want to take representative sections of our region orthophoto to assess the efficacy of our search.
+# 2. **Set parameters**: use the interactive widgets to set the CV search parameters.
+# 3. **Verify results**: inspect the interactive map and add or delete target points.
+# 4. **Export targets**: save the target location to a GeoJSON to be used for route planning.
+#
+#
 # We want to verify that the targets identified by our CV algorithm are correct and comprehensive.
 
 import sys
@@ -36,11 +44,82 @@ sys.path.append(str(Path.cwd().parent))
 region_crs = 32613 # Use this everywhere for consistency
 visualization_crs = 4326 # Use this when we need leaflet visualizations
 
+region_image_path = '../input/IGNORE_Brewster-2024-all-orthophoto-UTM-32613.tif'
 region_contour_geojson = '../input/interactive_proto/region_contour.geojson'
 micro_routes_filename = '../input/interactive_proto/micro_routes.geojson'
 targets_plants_filename = '../input/interactive_proto/targets.geojson'
 depots_filename = '../input/interactive_proto/depot_points.geojson'
 
+# -
+
+# ## 1. Sample Images
+#
+# Take random and manual samples of region orthophoto. We want variety, to ensure that our search parameters are effective across varying environmental conditions. 
+
+# +
+import random
+import rasterio
+import numpy as np
+import matplotlib.pyplot as plt
+
+def get_random_samples(image_path, sample_size, num_samples):
+    """
+    Extract random samples from a large image.
+    
+    Parameters:
+        image_path (str): Path to the orthophoto image.
+        sample_size (int): Size of the square samples (e.g., 512 for 512x512).
+        num_samples (int): Number of random samples to extract.
+
+    Returns:
+        List of numpy arrays representing the samples.
+    """
+    with rasterio.open(image_path) as src:
+        width, height = src.width, src.height
+        samples = []
+        
+        for _ in range(num_samples):
+            # Random top-left corner coordinates for the sample
+            x = random.randint(0, width - sample_size)
+            y = random.randint(0, height - sample_size)
+            
+            # Read the sample from the image
+            sample = src.read(
+                window=rasterio.windows.Window(x, y, sample_size, sample_size)
+            )
+            samples.append(sample)
+    
+    return samples
+
+def plot_samples(samples):
+    """
+    Plot a list of image samples for visualization.
+    
+    Parameters:
+        samples (list): List of numpy arrays representing image samples.
+    """
+    num_samples = len(samples)
+    cols = 4
+    rows = (num_samples // cols) + (num_samples % cols > 0)
+    
+    plt.figure(figsize=(15, rows * 4))
+    for i, sample in enumerate(samples):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(np.moveaxis(sample, 0, -1))  # Move channel axis for display
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+sample_size = 512
+num_samples = 10
+
+samples = get_random_samples(region_image_path, sample_size, num_samples)
+plot_samples(samples)
+
+# -
+
+# ## 3. Audit Target Results
 
 # +
 from ipyleaflet import (
