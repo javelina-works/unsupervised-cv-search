@@ -150,7 +150,7 @@ def plot_samples(samples):
     plt.figure(figsize=(15, rows * 4))
     for i, sample in enumerate(samples):
         plt.subplot(rows, cols, i + 1)
-        plt.imshow(sample)  # Move channel axis for display
+        plt.imshow(sample, cmap='Greens')  # Move channel axis for display
         plt.axis('off')
     plt.tight_layout()
     plt.show()

@@ -362,50 +362,6 @@ display(widgets.VBox([image_dropdown, output]))
 update_image(image_dropdown.value)
 
 # +
-from plant_search.load_image import load_image, plot_image
-
-image, transform, bounds, crs = load_image(region_image_path)
-if image is not None:
-    plot_image(image, "Original Image")
-
-# +
-from plant_search.vegetation_indices import calculate_all_rgb_indices
-
-import matplotlib.pyplot as plt
-
-# Calculate all indices
-indices = calculate_all_rgb_indices(image)
-
-# Prepare the indices and titles for plotting
-index_titles = [
-    ("Excess Green Index (ExG)", indices["ExG"]),
-    ("Green Leaf Index (GLI)", indices["GLI"]),
-    ("Normalized Difference Index (NDI)", indices["NDI"]),
-    ("Visible Atmospherically Resistant Index (VARI)", indices["VARI"]),
-    ("Triangular Vegetation Index (TVI)", indices["TVI"]),
-]
-
-# Set up the grid for three columns
-n_cols = 3
-n_rows = (len(index_titles) + n_cols - 1) // n_cols  # Compute rows based on the number of indices
-fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, n_rows * 5))
-
-# Plot each index
-for i, (title, index) in enumerate(index_titles):
-    row, col = divmod(i, n_cols)
-    axes[row, col].imshow(index, cmap='Greens')
-    axes[row, col].set_title(title)
-    axes[row, col].axis("off")
-
-# Turn off unused subplots
-for i in range(len(index_titles), n_rows * n_cols):
-    row, col = divmod(i, n_cols)
-    axes[row, col].axis("off")
-
-plt.tight_layout()
-plt.show()
-
-# +
 import matplotlib.pyplot as plt
 import ipywidgets as widgets
 from IPython.display import display
@@ -489,107 +445,93 @@ display(widgets.VBox([index_dropdown, output])) # Display the widgets
 update_plot(index_dropdown.value) # Initialize with the first vegetation index
 
 # +
+from plant_search.vegetation_indices import normalize_rgb, calculate_exg
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
+def preprocess_sample(image):
+    exg = calculate_exg(*normalize_rgb(image))
+    exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
+    exg_uint8 = (exg_normalized * 255).astype(np.uint8)
 
-bl_sigma_color = 50
-bl_sigma_spatial = 15 # Lower number is faster
+    if len(exg_uint8.shape) > 2 and exg_uint8.shape[2] > 3:
+        # Handle alpha channel or additional channels if any
+        exg_uint8 = exg_uint8[:, :, :3]
 
-# Normalize ExG to the range [0, 255] for OpenCV compatibility
-exg = indices["ExG"] # From the Vegetation Indices section above
-exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
-exg_uint8 = (exg_normalized * 255).astype(np.uint8)
+    # Step 1: Bilateral Filtering using OpenCV
+    bl_sigma_color = 50
+    bl_sigma_spatial = 15 # Lower number is faster
+    bilateral_smoothed = cv2.bilateralFilter(
+        exg_uint8 , d=9, 
+        sigmaColor=bl_sigma_color, 
+        sigmaSpace=bl_sigma_spatial
+    )
+    bilateral_smoothed = bilateral_smoothed / 255.0  # Scale back to [0, 1]
 
-# image_uint8 = (image).astype(np.uint8)
+    return bilateral_smoothed
 
-# if len(image_uint8.shape) > 2 and image_uint8.shape[2] > 3:
-#     # Handle alpha channel or additional channels if any
-#     image_uint8 = image_uint8[:, :, :3]
-
-# Step 1: Bilateral Filtering using OpenCV
-bilateral_smoothed = cv2.bilateralFilter(
-    exg_uint8 , d=9, 
-    sigmaColor=bl_sigma_color, 
-    sigmaSpace=bl_sigma_spatial
-)
-bilateral_smoothed = bilateral_smoothed / 255.0  # Scale back to [0, 1]
-
-# Create figure with geographic extent
-fig, ax = plt.subplots(figsize=(20, 16))
-
-# Calculate extent in geographic coordinates
-extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
-
-# Display the image with geographic extent
-ax.imshow(bilateral_smoothed, extent=extent, cmap='Greens')
-ax.set_title("Filtered")
-ax.set_xlabel("Longitude")
-ax.set_ylabel("Latitude")
-plt.show()
+indexed_samples = [preprocess_sample(sample) for sample in samples]
+plot_samples(indexed_samples)
 
 # +
-from plant_search.vegetation_indices import calculate_all_rgb_indices
-
-indices = calculate_all_rgb_indices(image)
-# -
-
-print(indices.keys())
-
-# +
-# Vegetation Index tab
-
-
-from plant_search.vegetation_indices import calculate_all_rgb_indices
-
-from ipywidgets.widgets import Output, Dropdown
+import numpy as np
 import matplotlib.pyplot as plt
+from ipywidgets import FloatSlider, interact
+from skimage.color import rgb2gray
+from skimage.util import img_as_float
 
+# Function to overlay the mask on the original image
+def overlay_mask(image, mask, color=(0, 255, 0), alpha=0.5):
+    overlay = np.zeros_like(image, dtype=np.uint8)
+    overlay[mask] = color
+    blended = image.copy()
+    blended[mask] = (blended[mask] * (1 - alpha) + overlay[mask] * alpha).astype(np.uint8)
+    return blended
 
-# indices = calculate_all_rgb_indices(image)
+# Function to process a list of images
+def process_images(image_list, threshold, opacity):
+    num_samples = len(image_list)
+    cols = 4
+    rows = (num_samples // cols) + (num_samples % cols > 0)
+    plt.figure(figsize=(15, rows * 4))
 
-# Prepare the indices and titles for plotting
-index_options = {
-    "Excess Green Index (ExG)": indices["ExG"],
-    "Green Leaf Index (GLI)": indices["GLI"],
-    "Normalized Difference Index (NDI)": indices["NDI"],
-    "Visible Atmospherically Resistant Index (VARI)": indices["VARI"],
-    "Triangular Vegetation Index (TVI)": indices["TVI"],
-}
+    for idx, image in enumerate(image_list):
+        if image.ndim == 2:  # If grayscale, convert to RGB for overlay
+            image = np.stack([image] * 3, axis=-1)
+        elif image.shape[-1] == 4:  # If RGBA, discard the alpha channel
+            image = image[..., :3]
 
-# Dropdown for selecting the vegetation index
-index_dropdown = Dropdown(
-    options=list(index_options.keys()),
-    value=list(index_options.keys())[0],  # Default selection
-    description="Index:",
-)
+        # Convert image to grayscale for thresholding
+        # image_normalized = img_as_float(rgb2gray(image))
+        sample = indexed_samples[idx]
+        mask = sample > threshold  # Create mask
 
-# Output widget for displaying plots
-output = Output()
+        # Create the overlayed image
+        overlayed_image = overlay_mask(image, mask, color=(0, 255, 0), alpha=opacity)
 
+        # Plot the overlayed image
+        plt.subplot(rows, cols, idx + 1)
+        plt.imshow(overlayed_image)
+        plt.axis('off')
 
-def plot_transformation(selected_index):
-    with output:
-        output.clear_output(wait=True)
+    plt.tight_layout()
+    plt.show()
 
-        image = index_options[selected_index]
+# Interactive function to apply thresholding to all images
+def interactive_thresholding(image_list):
+    interact(
+        lambda threshold, opacity: process_images(image_list, threshold, opacity),
+        threshold=FloatSlider(value=0.50, min=0.0, max=1.0, step=0.01, description="Threshold"),
+        opacity=FloatSlider(value=0.85, min=0.0, max=1.0, step=0.01, description="Opacity"),
+    )
 
-        fig, ax = plt.subplots(figsize=(10, 8))
+# Example Usage
+# Replace `samples` with your list of NumPy arrays representing RGB images
+# samples = [np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8) for _ in range(10)]
+interactive_thresholding(samples)
 
-        ax.imshow(image, cmap='Greens')
-        ax.set_title(selected_index)
-        ax.set_xlabel("Longitude")
-        ax.set_ylabel("Latitude")
-        plt.show()
-
-# Callback function for dropdown
-def on_index_change(change_value):
-    plot_transformation(change_value.new)
-index_dropdown.observe(on_index_change, names="value") # Observe dropdown changes
-
-display(widgets.VBox([index_dropdown, output])) # Display the widgets
-plot_transformation(index_dropdown.value) # Initialize with the first vegetation index
 
 # +
 from ipywidgets.widgets import Tab, Text
