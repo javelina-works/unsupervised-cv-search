@@ -364,10 +364,90 @@ update_image(image_dropdown.value)
 
 
 # +
-from plant_search.verify_targets import plot_samples
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from IPython.display import display
+import numpy as np
+from plant_search.vegetation_indices import (
+    calculate_all_rgb_indices,
+    normalize_rgb, calculate_exg, calculate_gli, calculate_ndi
+)
+from plant_search import vegetation_indices
 
+# List of sample images
+# samples = [image1, image2, image3]
 
-plot_samples(samples)
+# Vegetation index names
+index_options = ["Excess Green Index (ExG)", 
+                 "Green Leaf Index (GLI)", 
+                 "Normalized Difference Index (NDI)", 
+                 "Visible Atmospherically Resistant Index (VARI)", 
+                 "Triangular Vegetation Index (TVI)"
+                ]
+
+# Dropdown for selecting the vegetation index
+index_dropdown = widgets.Dropdown(
+    options=index_options,
+    value=index_options[0],  # Default selection
+    description="Index:",
+)
+
+# Output widget for displaying plots
+output = widgets.Output()
+
+# Function to calculate a selected vegetation index for all samples and plot the results
+def update_plot(selected_index):
+    with output:
+        output.clear_output(wait=True)
+        
+        # Prepare results for the selected vegetation index
+        results = []
+        for img in samples:
+            # Ensure images are in HWC format
+            if img.ndim == 3 and img.shape[0] == 3:
+                img = np.moveaxis(img, 0, -1)
+
+            r, g, b = vegetation_indices.normalize_rgb(img)
+
+            if selected_index == "Excess Green Index (ExG)":
+                indexed = vegetation_indices.calculate_exg(r, g, b)
+            elif selected_index == "Green Leaf Index (GLI)":
+                indexed = vegetation_indices.calculate_gli(r, g, b)
+            elif selected_index == "Normalized Difference Index (NDI)":
+                indexed = vegetation_indices.calculate_ndi(r, g)
+            elif selected_index == "Visible Atmospherically Resistant Index (VARI)": 
+                indexed = vegetation_indices.calculate_vari(r, g, b)
+            elif selected_index == "Triangular Vegetation Index (TVI)":
+                indexed = vegetation_indices.calculate_tvi(r, g, b)
+
+            results.append(indexed)
+        
+        # Plot the results in a grid
+        n_cols = 4  # Set number of columns
+        n_rows = (len(samples) + n_cols - 1) // n_cols  # Calculate number of rows
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, n_rows * 5))
+
+        for i, result in enumerate(results):
+            row, col = divmod(i, n_cols)
+            axes[row, col].imshow(result, cmap="Greens")
+            axes[row, col].set_title(f"Sample {i+1}", fontsize=14)
+            axes[row, col].axis("off")
+
+        # Turn off unused subplots
+        for i in range(len(results), n_rows * n_cols):
+            row, col = divmod(i, n_cols)
+            axes[row, col].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+# Callback function for dropdown
+def on_index_change(change_value):
+    update_plot(change_value.new)
+index_dropdown.observe(on_index_change, names="value") # Observe dropdown changes
+
+display(widgets.VBox([index_dropdown, output])) # Display the widgets
+update_plot(index_dropdown.value) # Initialize with the first vegetation index
 
 
 # +

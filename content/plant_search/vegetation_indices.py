@@ -13,11 +13,11 @@ def calculate_all_rgb_indices(image):
     r, g, b = normalize_rgb(image)
     
     indices = {
-        "ExG": calculate_exg(r, g, b),
-        "GLI": calculate_gli(r, g, b),
-        "NDI": calculate_ndi(r, g),
+        "ExG":  calculate_exg(r, g, b),
+        "GLI":  calculate_gli(r, g, b),
+        "NDI":  calculate_ndi(r, g),
         "VARI": calculate_vari(r, g, b),
-        "TVI": calculate_tvi(r,g,b)
+        "TVI":  calculate_tvi(r ,g, b)
     }
     
     return indices
