@@ -288,7 +288,6 @@ from plant_search.verify_targets import get_samples_from_gdf, plot_samples
 samples_gdf = combined_samples_container['combined_gdf']
 samples = get_samples_from_gdf(samples_gdf, region_image_path)
 plot_samples(samples)
-
 ```
 
 ```python
@@ -367,7 +366,52 @@ display(widgets.VBox([image_dropdown, output]))
 
 # Initialize with the first image
 update_image(image_dropdown.value)
+```
 
+```python
+from plant_search.load_image import load_image, plot_image
+
+image, transform, bounds, crs = load_image(region_image_path)
+if image is not None:
+    plot_image(image, "Original Image")
+```
+
+```python
+from plant_search.vegetation_indices import calculate_all_rgb_indices
+
+import matplotlib.pyplot as plt
+
+# Calculate all indices
+indices = calculate_all_rgb_indices(image)
+
+# Prepare the indices and titles for plotting
+index_titles = [
+    ("Excess Green Index (ExG)", indices["ExG"]),
+    ("Green Leaf Index (GLI)", indices["GLI"]),
+    ("Normalized Difference Index (NDI)", indices["NDI"]),
+    ("Visible Atmospherically Resistant Index (VARI)", indices["VARI"]),
+    ("Triangular Vegetation Index (TVI)", indices["TVI"]),
+]
+
+# Set up the grid for three columns
+n_cols = 3
+n_rows = (len(index_titles) + n_cols - 1) // n_cols  # Compute rows based on the number of indices
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, n_rows * 5))
+
+# Plot each index
+for i, (title, index) in enumerate(index_titles):
+    row, col = divmod(i, n_cols)
+    axes[row, col].imshow(index, cmap='Greens')
+    axes[row, col].set_title(title)
+    axes[row, col].axis("off")
+
+# Turn off unused subplots
+for i in range(len(index_titles), n_rows * n_cols):
+    row, col = divmod(i, n_cols)
+    axes[row, col].axis("off")
+
+plt.tight_layout()
+plt.show()
 ```
 
 ```python
@@ -380,9 +424,6 @@ from plant_search.vegetation_indices import (
     normalize_rgb, calculate_exg, calculate_gli, calculate_ndi
 )
 from plant_search import vegetation_indices
-
-# List of sample images
-# samples = [image1, image2, image3]
 
 # Vegetation index names
 index_options = ["Excess Green Index (ExG)", 
@@ -455,68 +496,359 @@ index_dropdown.observe(on_index_change, names="value") # Observe dropdown change
 
 display(widgets.VBox([index_dropdown, output])) # Display the widgets
 update_plot(index_dropdown.value) # Initialize with the first vegetation index
-
 ```
 
 ```python
-from plant_search.load_image import load_image
-from plant_search.verify_targets import plot_samples
-from plant_search.vegetation_indices import normalize_rgb, calculate_exg
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
 
 
+bl_sigma_color = 50
+bl_sigma_spatial = 15 # Lower number is faster
+
+# Normalize ExG to the range [0, 255] for OpenCV compatibility
+exg = indices["ExG"] # From the Vegetation Indices section above
+exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
+exg_uint8 = (exg_normalized * 255).astype(np.uint8)
+
+# image_uint8 = (image).astype(np.uint8)
+
+# if len(image_uint8.shape) > 2 and image_uint8.shape[2] > 3:
+#     # Handle alpha channel or additional channels if any
+#     image_uint8 = image_uint8[:, :, :3]
+
+# Step 1: Bilateral Filtering using OpenCV
+bilateral_smoothed = cv2.bilateralFilter(
+    exg_uint8 , d=9, 
+    sigmaColor=bl_sigma_color, 
+    sigmaSpace=bl_sigma_spatial
+)
+bilateral_smoothed = bilateral_smoothed / 255.0  # Scale back to [0, 1]
+
+# Create figure with geographic extent
+fig, ax = plt.subplots(figsize=(20, 16))
+
+# Calculate extent in geographic coordinates
+extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+
+# Display the image with geographic extent
+ax.imshow(bilateral_smoothed, extent=extent, cmap='Greens')
+ax.set_title("Filtered")
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+plt.show()
+```
+
+```python
+from plant_search.vegetation_indices import calculate_all_rgb_indices
+
+indices = calculate_all_rgb_indices(image)
+```
+
+```python
+print(indices.keys())
+```
+
+```python
+# Vegetation Index tab
+
+
+from plant_search.vegetation_indices import calculate_all_rgb_indices
+
+from ipywidgets.widgets import Output, Dropdown
+import matplotlib.pyplot as plt
+
+
+# indices = calculate_all_rgb_indices(image)
+
+# Prepare the indices and titles for plotting
+index_options = {
+    "Excess Green Index (ExG)": indices["ExG"],
+    "Green Leaf Index (GLI)": indices["GLI"],
+    "Normalized Difference Index (NDI)": indices["NDI"],
+    "Visible Atmospherically Resistant Index (VARI)": indices["VARI"],
+    "Triangular Vegetation Index (TVI)": indices["TVI"],
+}
+
+# Dropdown for selecting the vegetation index
+index_dropdown = Dropdown(
+    options=list(index_options.keys()),
+    value=list(index_options.keys())[0],  # Default selection
+    description="Index:",
+)
+
+# Output widget for displaying plots
+output = Output()
+
+
+def plot_transformation(selected_index):
+    with output:
+        output.clear_output(wait=True)
+
+        image = index_options[selected_index]
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        ax.imshow(image, cmap='Greens')
+        ax.set_title(selected_index)
+        ax.set_xlabel("Longitude")
+        ax.set_ylabel("Latitude")
+        plt.show()
+
+# Callback function for dropdown
+def on_index_change(change_value):
+    plot_transformation(change_value.new)
+index_dropdown.observe(on_index_change, names="value") # Observe dropdown changes
+
+display(widgets.VBox([index_dropdown, output])) # Display the widgets
+plot_transformation(index_dropdown.value) # Initialize with the first vegetation index
+```
+
+```python
+from ipywidgets.widgets import Tab, Text
+
+tab_titles = [
+    'Vegetation Index', 
+    'Filtering', 
+    'Contrast Enhance', 
+    'Morphological Refinement', 
+    'Thresholding'
+]
+
+
+
+
+children = [Text(description=name) for name in tab_titles]
+tab = Tab()
+tab.children = children
+tab.titles = tab_titles
+tab
+```
+
+```python
 from skimage.exposure import equalize_adapthist
 from skimage.filters import threshold_otsu
 from skimage.morphology import opening, closing, disk
-import cv2
+
+# Normalize ExG to the range [0, 255] for OpenCV compatibility
+exg = indices["ExG"] # From the Vegetation Indices section above
+exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
+exg_uint8 = (exg_normalized * 255).astype(np.uint8)
 
 
-def perform_cv(image):
+bl_sigma_color = 50
+bl_sigma_spatial = 15 # Lower number is faster
 
-    exg = calculate_exg(*normalize_rgb(image))
-    exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
-    exg_uint8 = (exg_normalized * 255).astype(np.uint8)
+# Step 1: Bilateral Filtering using OpenCV
+bilateral_smoothed_exg = cv2.bilateralFilter(
+    exg_uint8 , d=9, 
+    sigmaColor=bl_sigma_color, 
+    sigmaSpace=bl_sigma_spatial
+)
+bilateral_smoothed_exg = bilateral_smoothed_exg / 255.0  # Scale back to [0, 1]
 
-    bl_sigma_color = 50
-    bl_sigma_spatial = 15 # Lower number is faster
+# Step 2: Contrast Enhancement with CLAHE
+clahe_exg = equalize_adapthist(bilateral_smoothed_exg, clip_limit=0.02)
 
-    # Step 1: Bilateral Filtering using OpenCV
-    bilateral_smoothed_exg = cv2.bilateralFilter(
-        exg_uint8 , d=9, 
-        sigmaColor=bl_sigma_color, 
-        sigmaSpace=bl_sigma_spatial
-    )
-    bilateral_smoothed_exg = bilateral_smoothed_exg / 255.0  # Scale back to [0, 1]
+# Step 3: Morphological Operations (Opening → Closing)
+selem = disk(7)  # Structuring element
+morph_exg = closing(opening(clahe_exg, selem), selem)
 
-    # Step 2: Contrast Enhancement with CLAHE
-    clahe_exg = equalize_adapthist(bilateral_smoothed_exg, clip_limit=0.008)
+# Step 4: Thresholding (Otsu's method)
+# otsu_threshold = threshold_otsu(morph_exg)
+# binary_mask = morph_exg > otsu_threshold
+otsu_threshold = threshold_otsu(bilateral_smoothed_exg) # Skipping CLAHE, Morph
+binary_mask = bilateral_smoothed_exg > otsu_threshold
 
-    # Step 3: Morphological Operations (Opening → Closing)
-    selem = disk(7)  # Structuring element
-    morph_exg = closing(opening(clahe_exg, selem), selem)
+# Visualize the Pipeline
+fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+axes[0, 0].imshow(exg_normalized, cmap='Greens')
+axes[0, 0].set_title("Normalized ExG")
+axes[0, 0].axis("off")
 
-    # Step 4: Thresholding (Otsu's method)
-    otsu_threshold = threshold_otsu(morph_exg)
-    binary_mask = morph_exg > otsu_threshold
+axes[0, 1].imshow(bilateral_smoothed_exg, cmap='Greens')
+axes[0, 1].set_title("Bilateral Filtering")
+axes[0, 1].axis("off")
 
-    # return binary_mask
+axes[0, 2].imshow(clahe_exg, cmap='Greens')
+axes[0, 2].set_title("CLAHE (Contrast Enhancement)")
+axes[0, 2].axis("off")
 
-    highlighted_image = image.copy() * 255
-    # Enhance the mask regions with green (or any desired enhancement)
-    highlighted_image[binary_mask, 1] = 1.0  # Max out the green channel for mask regions
-    return highlighted_image * 255
+axes[1, 0].imshow(morph_exg, cmap='Greens')
+axes[1, 0].set_title("Morphological Refinement")
+axes[1, 0].axis("off")
 
-
-def plot_cv(samples):
-    
-    results = [perform_cv(sample) for sample in samples]
-    # results = [perform_cv(samples[0])]
-    plot_samples(results)
+axes[1, 1].imshow(binary_mask, cmap='gray')
+axes[1, 1].set_title("Thresholded Mask")
+axes[1, 1].axis("off")
 
 
-plot_cv(samples)
+highlighted_image = image.copy() * 255
+# Enhance the mask regions with green (or any desired enhancement)
+highlighted_image[binary_mask, 1] = 1.0  # Max out the green channel for mask regions
+
+# axes[1, 2].imshow(np.clip(highlighted, 0, 1))
+axes[1, 2].imshow(highlighted_image * 255)
+axes[1, 2].set_title("Highlighted Vegetation")
+axes[1, 2].axis("off")
+
+plt.tight_layout()
+plt.show()
+```
+
+```python
+
+
+fig, ax = plt.subplots(figsize=(20, 17))
+
+ax.imshow(highlighted_image * 255)
+ax.set_title("Highlighted targets")
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+plt.show()
 ```
 
 ## 3. Audit Target Results
+
+```python
+from ipyleaflet import (
+    Map, GeoJSON, LayersControl, ScaleControl, 
+    FullScreenControl, GeomanDrawControl,
+    TileLayer, LocalTileLayer, GeoData,
+)
+from ipyleaflet.projections import projections
+from ipywidgets import Layout
+
+from shapely.geometry import shape
+from shapely.wkt import loads
+import json
+import geopandas as gpd
+
+from ipyleaflet.projections import projections
+
+def plot_targets_on_map(region_geojson, depots_filename, micro_routes_filename, targets_plants_filename):
+
+    # Get image data
+    # image, transform, bounds, image_crs = load_image(orthophoto_path)
+
+    with open(region_geojson, "r") as f:
+        region_contour_data = json.load(f)
+    region_geometry = shape(region_contour_data['features'][0]['geometry'])
+    region_center = region_geometry.centroid
+
+    with open(depots_filename, "r") as f:
+        depot_data = json.load(f)
+
+    with open(micro_routes_filename, "r") as f:
+        micro_routes_data = json.load(f)
+
+    with open(targets_plants_filename, "r") as f:
+        targets_data = json.load(f)
+    
+    
+    
+    bboxes_gdf = gpd.read_file(targets_plants_filename) # Read in from file
+    bboxes_gdf['bounding_box'] = bboxes_gdf['bounding_box'].apply(loads) # str to Polygon
+    bboxes_gdf.set_geometry('bounding_box', inplace=True) # It is the primary geometry
+    bboxes_gdf = bboxes_gdf.drop(columns=['region_outline_version', 'geometry']) # remove confusing cols
+    bboxes_gdf = bboxes_gdf.set_crs(region_crs).to_crs(visualization_crs) # Needs CRS, then convert
+
+    
+    # bounding_boxes_gdf = gpd.GeoDataFrame(bboxes_gdf, geometry='geometry', crs=bboxes_gdf.crs)
+    # bounding_boxes_geojson = bounding_boxes_gdf.to_json()
+
+    # Set up the map
+    m = Map(center=(region_center.y, region_center.x),
+            zoom=16, scroll_wheel_zoom=True,
+            double_click_zoom=False,
+            layout=Layout(height="700px"),  # Set desired dimensions
+            # crs=projections.EPSG4326
+        )
+
+    # Add orthophoto overlay
+    tile_layer = TileLayer(
+        url="http://localhost:8000/{z}/{x}/{y}.png",
+        min_zoom=15,
+        max_zoom=22,
+        show_loading=True,
+        max_requests_per_tile=5,  # Adjust as needed
+        name="Region Image")
+    m.add_layer(tile_layer)
+
+    # Add the region border to the map
+    region_layer = GeoJSON(
+        data=region_contour_data, 
+        style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+        name=region_contour_data['name'])
+    m.add(region_layer)
+
+    depot_points = GeoJSON(
+        data=depot_data,
+        style={'color': 'black', 'radius':10, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
+        hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+        point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+        draggable=True,
+        name=depot_data['name']
+    )
+    m.add(depot_points)
+
+    routes_layer = GeoJSON(
+        data=micro_routes_data, 
+        style={'color': 'green', 'fillColor': 'green', 'opacity': 0.75, 'weight': 4},
+        hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
+        name=f'Micro Routes'
+    )
+    # m.add(routes_layer)
+
+    targets_layer = GeoJSON(
+        data=targets_data,
+        style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.6},
+        hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+        point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+        draggable=True,
+        name=targets_data['name']
+    )
+    def on_click_target(event, feature, properties):
+        # print(event)
+        # print(feature)
+        # print(properties)
+        # print(len(targets_data['features']))
+        targets_data['features'] = [
+            feature for feature in targets_data['features']
+            if feature['properties']['target_id'] != properties['target_id']
+        ]
+        print(len(targets_data['features']))
+        targets_layer.data = targets_data
+
+    targets_layer.on_click(on_click_target)
+
+
+    m.add(targets_layer)
+
+    bboxes_layer = GeoData(geo_dataframe = bboxes_gdf,
+                   style={'color': 'red', 'opacity':0.5, 'weight':1.9,
+                          'fill': False, 'fillColor': 'red', 'fillOpacity': 0.2
+                          },
+                   hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
+                   name = 'Countries')
+    # m.add(bboxes_layer)
+
+    draw_control = GeomanDrawControl()
+    draw_control.circlemarker = {}
+    draw_control.rotate = False
+    # draw_control.cut = False
+    draw_control.drag = False
+    m.add(draw_control)
+
+    # m.add(FullScreenControl(position='topleft'))
+    m.add(LayersControl(position='topright'))
+    m.add(ScaleControl(position='bottomleft'))
+    return m
+
+m = plot_route_on_image(region_contour_geojson, depots_filename, micro_routes_filename, targets_plants_filename)
+m
+```
 
 ```python
 from ipyleaflet import (
@@ -655,10 +987,4 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
 
 m = plot_route_on_image(region_contour_geojson, depots_filename, micro_routes_filename, targets_plants_filename)
 m
-```
-
-```python
-with open(targets_plants_filename, "r") as f:
-    targets_data = json.load(f)
-print(targets_data['features'])    
 ```
