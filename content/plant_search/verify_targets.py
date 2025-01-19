@@ -4,6 +4,9 @@ import rasterio
 from typing import Optional
 from shapely.geometry import shape, Point, Polygon, box
 import geopandas as gpd
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 def load_geojson(file_path):
     """
@@ -109,3 +112,44 @@ def get_image_sample_coordinates(image_path: str,
     return samples_gdf
 
 
+def get_samples_from_gdf(gdf, image_path):
+    """
+    Extract raster samples based on the polygons in a GeoDataFrame.
+
+    Parameters:
+        gdf (gpd.GeoDataFrame): GeoDataFrame containing sample polygons.
+        image_path (str): Path to the orthophoto image.
+
+    Returns:
+        List of numpy arrays representing the raster samples.
+    """
+    samples = []
+    with rasterio.open(image_path) as src:
+        for geom in gdf.geometry:
+            minx, miny, maxx, maxy = geom.bounds # Get the bounding box of the geometry
+            
+            # Convert bounding box to pixel coordinates
+            window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=src.transform)
+            sample = src.read(window=window)
+            samples.append(sample)
+    return samples
+
+
+def plot_samples(samples):
+    """
+    Plot a list of image samples for visualization.
+    
+    Parameters:
+        samples (list): List of numpy arrays representing image samples.
+    """
+    num_samples = len(samples)
+    cols = 4
+    rows = (num_samples // cols) + (num_samples % cols > 0)
+    
+    plt.figure(figsize=(15, rows * 4))
+    for i, sample in enumerate(samples):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(np.moveaxis(sample, 0, -1))  # Move channel axis for display
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()

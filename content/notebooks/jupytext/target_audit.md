@@ -63,170 +63,6 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 Take random and manual samples of region orthophoto. We want variety, to ensure that our search parameters are effective across varying environmental conditions. 
 
 ```python
-import random
-import rasterio
-import numpy as np
-import matplotlib.pyplot as plt
-
-def get_random_samples(image_path, sample_size, num_samples):
-    """
-    Extract random samples from a large image.
-    
-    Parameters:
-        image_path (str): Path to the orthophoto image.
-        sample_size (int): Size of the square samples (e.g., 512 for 512x512).
-        num_samples (int): Number of random samples to extract.
-
-    Returns:
-        List of numpy arrays representing the samples.
-    """
-    with rasterio.open(image_path) as src:
-        width, height = src.width, src.height
-        samples = []
-        
-        for _ in range(num_samples):
-            # Random top-left corner coordinates for the sample
-            x = random.randint(0, width - sample_size)
-            y = random.randint(0, height - sample_size)
-            
-            # Read the sample from the image
-            sample = src.read(
-                window=rasterio.windows.Window(x, y, sample_size, sample_size)
-            )
-            samples.append(sample)
-    
-    return samples
-
-def plot_samples(samples):
-    """
-    Plot a list of image samples for visualization.
-    
-    Parameters:
-        samples (list): List of numpy arrays representing image samples.
-    """
-    num_samples = len(samples)
-    cols = 4
-    rows = (num_samples // cols) + (num_samples % cols > 0)
-    
-    plt.figure(figsize=(15, rows * 4))
-    for i, sample in enumerate(samples):
-        plt.subplot(rows, cols, i + 1)
-        plt.imshow(np.moveaxis(sample, 0, -1))  # Move channel axis for display
-        plt.axis('off')
-    plt.tight_layout()
-    plt.show()
-
-
-sample_size = 512
-num_samples = 10
-
-samples = get_random_samples(region_image_path, sample_size, num_samples)
-plot_samples(samples)
-
-```
-
-```python
-from ipyleaflet import (
-    GeoData, GeoJSON, Map, Rectangle, TileLayer, 
-    ScaleControl, GeomanDrawControl, LayersControl
-)
-import json
-from shapely.geometry import shape
-
-
-def create_map(region_geojson, sample_boxes):
-    """
-    Create a map with rectangles showing the sample locations.
-
-    Parameters:
-        image_path (str): Path to the orthophoto image.
-        sample_boxes (list): List of bounding box coordinates (top_left, bottom_right).
-        crs (str): Coordinate reference system of the image.
-    """
-    with open(region_geojson, "r") as f:
-        region_contour_data = json.load(f)
-    region_geometry = shape(region_contour_data['features'][0]['geometry'])
-    region_center = region_geometry.centroid
-    
-    
-    # Initialize the map centered on the image
-    m = Map(center=(region_center.y, region_center.x), 
-            zoom=16, scroll_wheel_zoom=True,
-            double_click_zoom=False,
-            # crs=projections.EPSG4326,
-        )
-
-    # Add the region border to the map
-    region_layer = GeoJSON(
-        data=region_contour_data, 
-        style={'color': 'blue', 'fill': False, 'fillOpacity': 0.05, 'weight': 2},
-        name=region_contour_data['name'])
-    m.add(region_layer)
-
-    # Add orthophoto overlay
-    tile_layer = TileLayer(
-        url="http://localhost:8000/{z}/{x}/{y}.png",
-        min_zoom=15,
-        max_zoom=22,
-        show_loading=True,
-        max_requests_per_tile=5,  # Adjust as needed
-        name="Region Image")
-    m.add(tile_layer)
-
-    # Add layer of image samples
-    samples_layer = GeoData(geo_dataframe = sample_boxes,
-                   style={'color': 'blue', 'weight':2,
-                          'fill': False, 'fillColor': 'red', 'fillOpacity': 0.2
-                          },
-                   hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
-                   name = 'Countries')
-    m.add(samples_layer)
-
-    draw_control = GeomanDrawControl()
-    draw_control.circlemarker = {}
-    draw_control.polygon = {}
-    draw_control.polyline = {}
-    draw_control.rectangle = {
-        "pathOptions": {
-            "weight": 2,
-            "color": "green",
-            "fillOpacity": 0.1
-        }
-    }
-    draw_control.rotate = False
-    draw_control.cut = False
-    # draw_control.drag = False
-    m.add(draw_control)
-
-    # m.add(FullScreenControl(position='topleft'))
-    m.add(LayersControl(position='topright'))
-    m.add(ScaleControl(position='bottomleft'))
-
-    return m
-```
-
-```python
-from plant_search.verify_targets import get_image_sample_coordinates
-
-# Usage of functions
-sample_size = 512
-num_samples = 10
-
-# sample_boxes_gpd = get_image_sample_coordinates(region_image_path) # No region contour passed
-sample_boxes_gpd = get_image_sample_coordinates(
-    region_image_path, 
-    sample_size, 
-    num_samples, 
-    region_contour_geojson
-)
-
-sample_map = create_map(region_contour_geojson, sample_boxes_gpd)
-sample_map
-
-# sample_boxes_gpd
-```
-
-```python
 from ipyleaflet import (
     GeoData, GeoJSON, Map, Rectangle, TileLayer, 
     ScaleControl, GeomanDrawControl, LayersControl, WidgetControl
@@ -291,18 +127,18 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
         name="Region Image")
     m.add(tile_layer)
 
-    # Add layer of image samples
+
+    # Add random image samples and widgets to adjust
     samples_layer = GeoData(geo_dataframe = sample_boxes_gpd,
                    style={'color': 'blue', 'weight':2, 'fillOpacity': 0.05 },
                    hover_style={'color': 'red' , 'opacity': 1.0, },
+                   transform=True,
+                   draggable=True,
+                   pm_ignore=True,
                    name = 'Random Samples')
     m.add(samples_layer)
 
-
-    print(samples_layer.data)
-
-    # Add interactive widget controls
-    # Regenerate random samples
+    # Widget: regenerate samples
     resample_button = Button(
         description="Resample Image",  # Button label
         tooltip="Get new random samples of region",  # Tooltip text
@@ -316,9 +152,8 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
 
     resample_button.on_click(on_resample_click)
     m.add(WidgetControl(widget=resample_button, position='bottomright'))
-    
 
-    # Change number of samples
+    # Widget: Change number of samples
     samples_slider = IntSlider(
         value=num_samples, min=4, max=20, step=1,
         description="Count:",
@@ -346,7 +181,7 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
     )
     def save_combined_features(change):
         nonlocal container
-        
+
         # Ensure `draw_control.data` is iterable and extract features
         drawn_geometries = []
         if isinstance(draw_control.data, list):  # Check if data is a list
@@ -363,7 +198,6 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
         else:
             drawn_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
 
-
         # Combine the two GeoDataFrames
         programmatic_gdf = samples_layer.geo_dataframe # Get random rectangles
         combined_gdf = gpd.GeoDataFrame(pd.concat([drawn_gdf, programmatic_gdf], ignore_index=True))
@@ -372,12 +206,11 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
         if container is not None:
             container['combined_gdf'] = combined_gdf
 
-        # Save to GeoJSON
+        # # Save to GeoJSON
         # output_file = "combined_features.geojson"
         # combined_gdf.to_file(output_file, driver="GeoJSON")
         # print(f"Combined features saved to {output_file}.")
     save_button.on_click(save_combined_features)
-
     m.add(WidgetControl(widget=save_button, position='bottomright'))
 
 
@@ -396,17 +229,11 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
     draw_control.rotate = False
     draw_control.cut = False
     draw_control.edit = False
+    draw_control.drag = False # Does not maintain state 
 
     def handle_draw(self, action, geo_json):
-        print(action)
-        print(geo_json)
-        # print(f"New feature drawn: {event}")
-        # print(f"Current drawn features: {draw_control.data}")
-
         nonlocal container
-        
-        # Define precision for rounding
-        precision = 6
+        precision = 6 # Define precision for rounding
 
         def round_geometry(geometry, precision):
             """Round geometry coordinates to a specified precision."""
@@ -424,16 +251,16 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
                         lambda geom: round_geometry(geom, precision).equals(deleted_geometry)
                         )
                 ]
-                # print("Updated Combined GeoDataFrame after deletion:")
-                # print(len(samples_layer.geo_dataframe))
                 
         elif action == "drag":
-            print("Feature dragged.")
-        elif action == "created":
-            print("Feature created.")
+            pass
+        elif action == "create":
+            pass
+        else:
+            print(f"Action: {action}")
+            print(geo_json)
 
     draw_control.on_draw(handle_draw)
-
     m.add(draw_control)
 
     # m.add(FullScreenControl(position='topleft'))
@@ -444,19 +271,28 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
 ```
 
 ```python
-combined_samples_container = {}
+combined_samples_container = {} # To retrieve edited samples from map
 
 sample_map = sample_region_map(region_image_path, region_contour_geojson, combined_samples_container)
 sample_map
+```
 
-# sample_map.layers
+## 2. Set Parameters
+1. Visualize samples picked earlier
+2. Visualize parameters on same sample set
+
+```python
+from plant_search.verify_targets import get_samples_from_gdf, plot_samples
+
+# Extract and plot samples
+samples_gdf = combined_samples_container['combined_gdf']
+samples = get_samples_from_gdf(samples_gdf, region_image_path)
+plot_samples(samples)
+
 ```
 
 ```python
-# TODO: drag is not working as hoped
 
-print(len(combined_samples_container['combined_gdf']))
-print(combined_samples_container['combined_gdf'])
 ```
 
 ## 3. Audit Target Results
