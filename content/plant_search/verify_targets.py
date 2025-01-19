@@ -131,6 +131,7 @@ def get_samples_from_gdf(gdf, image_path):
             # Convert bounding box to pixel coordinates
             window = rasterio.windows.from_bounds(minx, miny, maxx, maxy, transform=src.transform)
             sample = src.read(window=window)
+            sample = np.moveaxis(sample, 0, -1)  # Move channel axis for display (else dims wrong for plt)
             samples.append(sample)
     return samples
 
@@ -149,7 +150,7 @@ def plot_samples(samples):
     plt.figure(figsize=(15, rows * 4))
     for i, sample in enumerate(samples):
         plt.subplot(rows, cols, i + 1)
-        plt.imshow(np.moveaxis(sample, 0, -1))  # Move channel axis for display
+        plt.imshow(sample)  # Move channel axis for display
         plt.axis('off')
     plt.tight_layout()
     plt.show()

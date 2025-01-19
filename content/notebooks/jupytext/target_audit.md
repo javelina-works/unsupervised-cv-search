@@ -129,7 +129,7 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
 
 
     # Add random image samples and widgets to adjust
-    samples_layer = GeoData(geo_dataframe = sample_boxes_gpd,
+    samples_layer = GeoData(geo_dataframe = sample_boxes_gdf,
                    style={'color': 'blue', 'weight':2, 'fillOpacity': 0.05 },
                    hover_style={'color': 'red' , 'opacity': 1.0, },
                    transform=True,
@@ -145,10 +145,10 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
         icon="check"  # Optional icon (FontAwesome class, e.g., 'check', 'close')
     )
     def on_resample_click(change):
-        sample_boxes_gpd = get_image_sample_coordinates(
+        sample_boxes_gdf = get_image_sample_coordinates(
             region_image_path, sample_size, num_samples, region_geojson
         )
-        samples_layer.geo_dataframe = sample_boxes_gpd # refresh map layer
+        samples_layer.geo_dataframe = sample_boxes_gdf # refresh map layer
 
     resample_button.on_click(on_resample_click)
     m.add(WidgetControl(widget=resample_button, position='bottomright'))
@@ -163,11 +163,11 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
         nonlocal num_samples # Ensure update of function variable
 
         new_sample_count = change['new']
-        sample_boxes_gpd = get_image_sample_coordinates(
+        sample_boxes_gdf = get_image_sample_coordinates(
             region_image_path, sample_size, new_sample_count, region_geojson
         )
         num_samples = new_sample_count # Update function counter
-        samples_layer.geo_dataframe = sample_boxes_gpd # refresh map layer
+        samples_layer.geo_dataframe = sample_boxes_gdf # refresh map layer
 
     samples_slider.observe(on_count_change, names='value')  # Trigger on value change
     m.add(WidgetControl(widget=samples_slider, position='bottomright'))
@@ -292,6 +292,219 @@ plot_samples(samples)
 ```
 
 ```python
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from IPython.display import display
+import numpy as np
+from plant_search.vegetation_indices import calculate_all_rgb_indices
+
+# Generate meaningful labels for the dropdown
+image_labels = [f"Sample {i+1}" for i in range(len(samples))]
+image_dict = dict(zip(image_labels, samples))  # Map labels to images
+
+# Dropdown widget for selecting the image
+image_dropdown = widgets.Dropdown(
+    options=image_labels,
+    value=image_labels[0],  # Default selected image
+    description="Image:",
+)
+
+# Output widget for displaying plots
+output = widgets.Output()
+
+# Function to process the selected image and display all vegetation indices
+def update_image(selected_image_label):
+    with output:
+        output.clear_output(wait=True)
+        # Get the selected image
+        selected_image = image_dict[selected_image_label]
+        
+        # Ensure the image is in HWC format (if it is CHW)
+        if selected_image.ndim == 3 and selected_image.shape[0] == 3:
+            selected_image = np.moveaxis(selected_image, 0, -1)
+
+        # Calculate all vegetation indices
+        indices = calculate_all_rgb_indices(selected_image)
+
+        # Prepare the indices and titles for plotting
+        index_titles = [
+            ("Excess Green Index (ExG)", indices["ExG"]),
+            ("Green Leaf Index (GLI)", indices["GLI"]),
+            ("Normalized Difference Index (NDI)", indices["NDI"]),
+            ("Visible Atmospherically Resistant Index (VARI)", indices["VARI"]),
+            ("Triangular Vegetation Index (TVI)", indices["TVI"]),
+        ]
+
+        # Set up the grid for displaying all indices
+        n_cols = 3
+        n_rows = (len(index_titles) + n_cols - 1) // n_cols  # Compute rows
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, n_rows * 5))
+
+        # Plot each vegetation index
+        for i, (title, index) in enumerate(index_titles):
+            row, col = divmod(i, n_cols)
+            axes[row, col].imshow(index, cmap="Greens")
+            axes[row, col].set_title(title, fontsize=14)
+            axes[row, col].axis("off")
+
+        # Turn off unused subplots
+        for i in range(len(index_titles), n_rows * n_cols):
+            row, col = divmod(i, n_cols)
+            axes[row, col].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+# Callback for dropdown change
+def on_image_change(change):
+    update_image(change.new)
+
+# Observe dropdown changes
+image_dropdown.observe(on_image_change, names="value")
+
+# Display the dropdown and output
+display(widgets.VBox([image_dropdown, output]))
+
+# Initialize with the first image
+update_image(image_dropdown.value)
+
+```
+
+```python
+from plant_search.verify_targets import plot_samples
+
+
+plot_samples(samples)
+
+```
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+from ipywidgets.widgets import Dropdown
+from plant_search.vegetation_indices import calculate_all_rgb_indices
+
+# Calculate all indices
+image = samples[0]
+# image = np.moveaxis(image, 0, -1)
+indices = calculate_all_rgb_indices(image)
+
+# Prepare the indices and titles for plotting
+index_titles = [
+    ("Excess Green Index (ExG)", indices["ExG"]),
+    ("Green Leaf Index (GLI)", indices["GLI"]),
+    ("Normalized Difference Index (NDI)", indices["NDI"]),
+    ("Visible Atmospherically Resistant Index (VARI)", indices["VARI"]),
+    ("Triangular Vegetation Index (TVI)", indices["TVI"]),
+]
+
+# Set up the grid for three columns
+n_cols = 3
+n_rows = (len(index_titles) + n_cols - 1) // n_cols  # Compute rows based on the number of indices
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, n_rows * 5))
+
+# Plot each index
+for i, (title, index) in enumerate(index_titles):
+    row, col = divmod(i, n_cols)
+    axes[row, col].imshow(index, cmap='Greens')
+    # axes[row, col].imshow(np.moveaxis(image, 0, -1))
+    axes[row, col].set_title(title)
+    axes[row, col].axis("off")
+
+# Turn off unused subplots
+for i in range(len(index_titles), n_rows * n_cols):
+    row, col = divmod(i, n_cols)
+    axes[row, col].axis("off")
+
+plt.tight_layout()
+plt.show()
+
+```
+
+```python
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from IPython.display import display
+from plant_search.vegetation_indices import calculate_all_rgb_indices
+
+image_labels = [f"Sample Image {i+1}" for i in range(len(samples))]
+image_dict = dict(zip(image_labels, samples))  # Map labels to images
+
+# Dropdown widget for selecting the image
+image_dropdown = widgets.Dropdown(
+    options=image_labels,
+    value=image_labels[0],  # Default selected image
+    description="Image:",
+)
+
+# Placeholder for vegetation indices
+index_titles = {}
+
+# Dropdown widget for index selection
+index_dropdown = widgets.Dropdown(
+    options=[],  # This will be populated based on the selected image
+    value=None,
+    description="Index:",
+)
+
+# Output area for the plot
+output = widgets.Output()
+
+# Function to update the indices and index dropdown when the image changes
+def update_indices(selected_image_label):
+    global index_titles
+    # Get the selected image from the dictionary
+    image = image_dict[selected_image_label]
+    # Calculate indices for the selected image
+    indices = calculate_all_rgb_indices(image)
+    # Update the index_titles dictionary
+    index_titles = {
+        "Excess Green Index (ExG)": indices["ExG"],
+        "Green Leaf Index (GLI)": indices["GLI"],
+        "Normalized Difference Index (NDI)": indices["NDI"],
+        "Visible Atmospherically Resistant Index (VARI)": indices["VARI"],
+        "Triangular Vegetation Index (TVI)": indices["TVI"],
+    }
+    # Update the index dropdown options
+    index_dropdown.options = list(index_titles.keys())
+    index_dropdown.value = list(index_titles.keys())[0]  # Set default value
+    # Update the plot for the new image and default index
+    update_plot(index_dropdown.value)
+
+# Function to update the plot based on the selected index
+def update_plot(selected_index):
+    if not index_titles:
+        return
+    index_data = index_titles[selected_index]
+    plt.figure(figsize=(10, 8))  # Adjust figure size
+    plt.imshow(index_data, cmap='Greens', aspect='auto')
+    plt.title(f"{selected_index}", fontsize=14)  # Larger title font
+    plt.axis("off")
+    plt.tight_layout()  # Ensure layout fits the figure area
+    plt.show()
+
+# Observe changes in the image dropdown
+def on_image_change(change):
+    with output:
+        output.clear_output(wait=True)
+        update_indices(change.new)
+
+image_dropdown.observe(on_image_change, names='value')
+
+# Observe changes in the index dropdown
+def on_index_change(change):
+    with output:
+        output.clear_output(wait=True)
+        update_plot(change.new)
+
+index_dropdown.observe(on_index_change, names='value')
+
+# Display widgets and initial plot
+display(widgets.VBox([image_dropdown, index_dropdown, output]))
+
+# Initialize with the first image and indices
+update_indices(image_dropdown.value)
+
 
 ```
 
