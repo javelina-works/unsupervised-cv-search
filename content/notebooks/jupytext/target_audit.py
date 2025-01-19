@@ -83,8 +83,8 @@ def sample_region_map(region_image_path, region_geojson=None, container=None):
         Map: An ipyleaflet map instance.
     """   
     # Initialize data for interaction
-    sample_size = 512
-    num_samples = 10
+    sample_size = 2048
+    num_samples = 5
     sample_boxes_gdf = get_image_sample_coordinates(
         region_image_path, sample_size, num_samples, region_geojson
     )
@@ -451,132 +451,61 @@ update_plot(index_dropdown.value) # Initialize with the first vegetation index
 
 
 # +
-import matplotlib.pyplot as plt
-import numpy as np
-from ipywidgets.widgets import Dropdown
-from plant_search.vegetation_indices import calculate_all_rgb_indices
-
-# Calculate all indices
-image = samples[0]
-# image = np.moveaxis(image, 0, -1)
-indices = calculate_all_rgb_indices(image)
-
-# Prepare the indices and titles for plotting
-index_titles = [
-    ("Excess Green Index (ExG)", indices["ExG"]),
-    ("Green Leaf Index (GLI)", indices["GLI"]),
-    ("Normalized Difference Index (NDI)", indices["NDI"]),
-    ("Visible Atmospherically Resistant Index (VARI)", indices["VARI"]),
-    ("Triangular Vegetation Index (TVI)", indices["TVI"]),
-]
-
-# Set up the grid for three columns
-n_cols = 3
-n_rows = (len(index_titles) + n_cols - 1) // n_cols  # Compute rows based on the number of indices
-fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, n_rows * 5))
-
-# Plot each index
-for i, (title, index) in enumerate(index_titles):
-    row, col = divmod(i, n_cols)
-    axes[row, col].imshow(index, cmap='Greens')
-    # axes[row, col].imshow(np.moveaxis(image, 0, -1))
-    axes[row, col].set_title(title)
-    axes[row, col].axis("off")
-
-# Turn off unused subplots
-for i in range(len(index_titles), n_rows * n_cols):
-    row, col = divmod(i, n_cols)
-    axes[row, col].axis("off")
-
-plt.tight_layout()
-plt.show()
+from plant_search.load_image import load_image
+from plant_search.verify_targets import plot_samples
+from plant_search.vegetation_indices import normalize_rgb, calculate_exg
 
 
-# +
-import matplotlib.pyplot as plt
-import ipywidgets as widgets
-from IPython.display import display
-from plant_search.vegetation_indices import calculate_all_rgb_indices
-
-image_labels = [f"Sample Image {i+1}" for i in range(len(samples))]
-image_dict = dict(zip(image_labels, samples))  # Map labels to images
-
-# Dropdown widget for selecting the image
-image_dropdown = widgets.Dropdown(
-    options=image_labels,
-    value=image_labels[0],  # Default selected image
-    description="Image:",
-)
-
-# Placeholder for vegetation indices
-index_titles = {}
-
-# Dropdown widget for index selection
-index_dropdown = widgets.Dropdown(
-    options=[],  # This will be populated based on the selected image
-    value=None,
-    description="Index:",
-)
-
-# Output area for the plot
-output = widgets.Output()
-
-# Function to update the indices and index dropdown when the image changes
-def update_indices(selected_image_label):
-    global index_titles
-    # Get the selected image from the dictionary
-    image = image_dict[selected_image_label]
-    # Calculate indices for the selected image
-    indices = calculate_all_rgb_indices(image)
-    # Update the index_titles dictionary
-    index_titles = {
-        "Excess Green Index (ExG)": indices["ExG"],
-        "Green Leaf Index (GLI)": indices["GLI"],
-        "Normalized Difference Index (NDI)": indices["NDI"],
-        "Visible Atmospherically Resistant Index (VARI)": indices["VARI"],
-        "Triangular Vegetation Index (TVI)": indices["TVI"],
-    }
-    # Update the index dropdown options
-    index_dropdown.options = list(index_titles.keys())
-    index_dropdown.value = list(index_titles.keys())[0]  # Set default value
-    # Update the plot for the new image and default index
-    update_plot(index_dropdown.value)
-
-# Function to update the plot based on the selected index
-def update_plot(selected_index):
-    if not index_titles:
-        return
-    index_data = index_titles[selected_index]
-    plt.figure(figsize=(10, 8))  # Adjust figure size
-    plt.imshow(index_data, cmap='Greens', aspect='auto')
-    plt.title(f"{selected_index}", fontsize=14)  # Larger title font
-    plt.axis("off")
-    plt.tight_layout()  # Ensure layout fits the figure area
-    plt.show()
-
-# Observe changes in the image dropdown
-def on_image_change(change):
-    with output:
-        output.clear_output(wait=True)
-        update_indices(change.new)
-
-image_dropdown.observe(on_image_change, names='value')
-
-# Observe changes in the index dropdown
-def on_index_change(change):
-    with output:
-        output.clear_output(wait=True)
-        update_plot(change.new)
-
-index_dropdown.observe(on_index_change, names='value')
-
-# Display widgets and initial plot
-display(widgets.VBox([image_dropdown, index_dropdown, output]))
-
-# Initialize with the first image and indices
-update_indices(image_dropdown.value)
+from skimage.exposure import equalize_adapthist
+from skimage.filters import threshold_otsu
+from skimage.morphology import opening, closing, disk
+import cv2
 
 
+def perform_cv(image):
+
+    exg = calculate_exg(*normalize_rgb(image))
+    exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
+    exg_uint8 = (exg_normalized * 255).astype(np.uint8)
+
+    bl_sigma_color = 50
+    bl_sigma_spatial = 15 # Lower number is faster
+
+    # Step 1: Bilateral Filtering using OpenCV
+    bilateral_smoothed_exg = cv2.bilateralFilter(
+        exg_uint8 , d=9, 
+        sigmaColor=bl_sigma_color, 
+        sigmaSpace=bl_sigma_spatial
+    )
+    bilateral_smoothed_exg = bilateral_smoothed_exg / 255.0  # Scale back to [0, 1]
+
+    # Step 2: Contrast Enhancement with CLAHE
+    clahe_exg = equalize_adapthist(bilateral_smoothed_exg, clip_limit=0.008)
+
+    # Step 3: Morphological Operations (Opening → Closing)
+    selem = disk(7)  # Structuring element
+    morph_exg = closing(opening(clahe_exg, selem), selem)
+
+    # Step 4: Thresholding (Otsu's method)
+    otsu_threshold = threshold_otsu(morph_exg)
+    binary_mask = morph_exg > otsu_threshold
+
+    # return binary_mask
+
+    highlighted_image = image.copy() * 255
+    # Enhance the mask regions with green (or any desired enhancement)
+    highlighted_image[binary_mask, 1] = 1.0  # Max out the green channel for mask regions
+    return highlighted_image * 255
+
+
+def plot_cv(samples):
+    
+    results = [perform_cv(sample) for sample in samples]
+    # results = [perform_cv(samples[0])]
+    plot_samples(results)
+
+
+plot_cv(samples)
 # -
 
 # ## 3. Audit Target Results
