@@ -493,7 +493,7 @@ def overlay_mask(image, mask, color=(0, 255, 0), alpha=0.5):
 # Function to process a list of images
 def process_images(image_list, threshold, opacity):
     num_samples = len(image_list)
-    cols = 4
+    cols = 3
     rows = (num_samples // cols) + (num_samples % cols > 0)
     plt.figure(figsize=(15, rows * 4))
 
@@ -554,78 +554,80 @@ tab.titles = tab_titles
 tab
 
 # +
+from plant_search.load_image import load_image, plot_image
+
+image, transform, bounds, crs = load_image(region_image_path)
+if image is not None:
+    plot_image(image, "Original Image")
+
+# +
 from skimage.exposure import equalize_adapthist
 from skimage.filters import threshold_otsu
 from skimage.morphology import opening, closing, disk
 
-# Normalize ExG to the range [0, 255] for OpenCV compatibility
-exg = indices["ExG"] # From the Vegetation Indices section above
-exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
-exg_uint8 = (exg_normalized * 255).astype(np.uint8)
+from plant_search.vegetation_indices import normalize_rgb, calculate_exg
+
+# Techniques being implemented
+vegetation_indices = True
+smoothing = True
+contrast_enhancement = False
+morphological = False
+
+def full_veg_index(image):
+    # Normalize ExG to the range [0, 255] for OpenCV compatibility
+    exg = calculate_exg(*normalize_rgb(image))
+    exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
+    exg_uint8 = (exg_normalized * 255).astype(np.uint8)
+    return exg_uint8
+
+def full_smoothing(image):
+    bl_sigma_color = 50
+    bl_sigma_spatial = 15 # Lower number is faster
+
+    # Step 1: Bilateral Filtering using OpenCV
+    bilateral_smoothed_exg = cv2.bilateralFilter(
+        image , d=9, 
+        sigmaColor=bl_sigma_color, 
+        sigmaSpace=bl_sigma_spatial
+    )
+    bilateral_smoothed_exg = bilateral_smoothed_exg / 255.0  # Scale back to [0, 1]
+    return bilateral_smoothed_exg
+
+def full_contrast(image):
+    # Step 2: Contrast Enhancement with CLAHE
+    clahe_exg = equalize_adapthist(image, clip_limit=0.02)
+    return clahe_exg
+
+def full_morphological(image):
+    # Step 3: Morphological Operations (Opening → Closing)
+    selem = disk(7)  # Structuring element
+    morph_exg = closing(opening(image, selem), selem)
+    return morph_exg
 
 
-bl_sigma_color = 50
-bl_sigma_spatial = 15 # Lower number is faster
 
-# Step 1: Bilateral Filtering using OpenCV
-bilateral_smoothed_exg = cv2.bilateralFilter(
-    exg_uint8 , d=9, 
-    sigmaColor=bl_sigma_color, 
-    sigmaSpace=bl_sigma_spatial
-)
-bilateral_smoothed_exg = bilateral_smoothed_exg / 255.0  # Scale back to [0, 1]
 
-# Step 2: Contrast Enhancement with CLAHE
-clahe_exg = equalize_adapthist(bilateral_smoothed_exg, clip_limit=0.02)
 
-# Step 3: Morphological Operations (Opening → Closing)
-selem = disk(7)  # Structuring element
-morph_exg = closing(opening(clahe_exg, selem), selem)
+processed_image = image
 
-# Step 4: Thresholding (Otsu's method)
-# otsu_threshold = threshold_otsu(morph_exg)
-# binary_mask = morph_exg > otsu_threshold
-otsu_threshold = threshold_otsu(bilateral_smoothed_exg) # Skipping CLAHE, Morph
-binary_mask = bilateral_smoothed_exg > otsu_threshold
+if vegetation_indices:
+    processed_image = full_veg_index(processed_image)
+if smoothing:
+    processed_image = full_smoothing(processed_image)
+if contrast_enhancement:
+    processed_image = full_contrast(processed_image)
+if morphological:
+    processed_image = full_morphological(processed_image)
 
-# Visualize the Pipeline
-fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-axes[0, 0].imshow(exg_normalized, cmap='Greens')
-axes[0, 0].set_title("Normalized ExG")
-axes[0, 0].axis("off")
-
-axes[0, 1].imshow(bilateral_smoothed_exg, cmap='Greens')
-axes[0, 1].set_title("Bilateral Filtering")
-axes[0, 1].axis("off")
-
-axes[0, 2].imshow(clahe_exg, cmap='Greens')
-axes[0, 2].set_title("CLAHE (Contrast Enhancement)")
-axes[0, 2].axis("off")
-
-axes[1, 0].imshow(morph_exg, cmap='Greens')
-axes[1, 0].set_title("Morphological Refinement")
-axes[1, 0].axis("off")
-
-axes[1, 1].imshow(binary_mask, cmap='gray')
-axes[1, 1].set_title("Thresholded Mask")
-axes[1, 1].axis("off")
-
+# Manual thresholding
+threshold = 0.46
+binary_mask = processed_image > threshold
 
 highlighted_image = image.copy() * 255
 # Enhance the mask regions with green (or any desired enhancement)
 highlighted_image[binary_mask, 1] = 1.0  # Max out the green channel for mask regions
 
-# axes[1, 2].imshow(np.clip(highlighted, 0, 1))
-axes[1, 2].imshow(highlighted_image * 255)
-axes[1, 2].set_title("Highlighted Vegetation")
-axes[1, 2].axis("off")
-
-plt.tight_layout()
-plt.show()
-
-# +
-
-
+# Visualize the Pipeline
 fig, ax = plt.subplots(figsize=(20, 17))
 
 ax.imshow(highlighted_image * 255)
@@ -633,6 +635,23 @@ ax.set_title("Highlighted targets")
 ax.set_xlabel("Longitude")
 ax.set_ylabel("Latitude")
 plt.show()
+
+# -
+
+# ### 2b. Find Targets from Binary Mask
+# At this point we will have a binary mask, but not yet discrete target regions. The following snippet will search our binary mask for contiguous "regions" and determine target locations.
+
+# +
+from plant_search.image_preprocess import identify_targets
+
+# Approach 1: from full-sized orthopho
+targets_gdf = identify_targets(binary_mask, transform)
+
+print(f"Image dimensions: {image.shape}")
+print(f"Number of targets (detected plants): {len(targets_gdf)}")
+
+# +
+# targets_gdf
 # -
 
 # ## 3. Audit Target Results
@@ -772,7 +791,7 @@ def plot_targets_on_map(region_geojson, depots_filename, micro_routes_filename, 
     m.add(ScaleControl(position='bottomleft'))
     return m
 
-m = plot_route_on_image(region_contour_geojson, depots_filename, micro_routes_filename, targets_plants_filename)
+m = plot_targets_on_map(region_contour_geojson, depots_filename, micro_routes_filename, targets_plants_filename)
 m
 
 # +
