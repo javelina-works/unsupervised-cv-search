@@ -473,7 +473,7 @@ def preprocess_sample(image):
     return bilateral_smoothed
 
 indexed_samples = [preprocess_sample(sample) for sample in samples]
-plot_samples(indexed_samples)
+# plot_samples(indexed_samples)
 
 # +
 import numpy as np
@@ -534,8 +534,9 @@ interactive_thresholding(samples)
 
 
 # +
-from ipywidgets.widgets import Tab, Text
+from ipywidgets import Tab, Text, Checkbox, VBox
 
+# Tab titles
 tab_titles = [
     'Vegetation Index', 
     'Filtering', 
@@ -544,14 +545,50 @@ tab_titles = [
     'Thresholding'
 ]
 
+# Dictionary to store tabs and their associated widgets
+tabs_data = {}
 
+# Function to update the dictionary on widget changes
+def update_tabs_data(change, title, key):
+    tabs_data[title][key] = change['new']
+    print(f"Updated '{title}' -> {key}: {change['new']}")
 
+# Create widgets for each tab and organize them into a dictionary
+for title in tab_titles:
+    enable_checkbox = Checkbox(value=True, description=f"Enable {title}")
+    input_field = Text(description=f'{title} Input')
+    
+    # Store widgets and their initial values in the dictionary
+    tabs_data[title] = {
+        'enable_checkbox': enable_checkbox,
+        'input_field': input_field,
+        'enabled': enable_checkbox.value,
+        'input_value': input_field.value
+    }
+    
+    # Attach callbacks to widgets
+    enable_checkbox.observe(lambda change, t=title: update_tabs_data(change, t, 'enabled'), names='value')
+    input_field.observe(lambda change, t=title: update_tabs_data(change, t, 'input_value'), names='value')
 
-children = [Text(description=name) for name in tab_titles]
+# Create the Tab widget
+children = []
+for title in tab_titles:
+    # Arrange the widgets vertically in each tab
+    tab_content = VBox([
+        tabs_data[title]['enable_checkbox'],
+        tabs_data[title]['input_field']
+    ])
+    children.append(tab_content)
+
+# Create and configure the tab widget
 tab = Tab()
 tab.children = children
-tab.titles = tab_titles
+for i, title in enumerate(tab_titles):
+    tab.set_title(i, title)
+
+# Display the tab widget
 tab
+
 
 # +
 from plant_search.load_image import load_image, plot_image
@@ -566,12 +603,6 @@ from skimage.filters import threshold_otsu
 from skimage.morphology import opening, closing, disk
 
 from plant_search.vegetation_indices import normalize_rgb, calculate_exg
-
-# Techniques being implemented
-vegetation_indices = True
-smoothing = True
-contrast_enhancement = False
-morphological = True
 
 def full_veg_index(image):
     # Normalize ExG to the range [0, 255] for OpenCV compatibility
@@ -605,7 +636,11 @@ def full_morphological(image):
     return morph_exg
 
 
-
+# Chosen techniques to be implemented
+vegetation_indices = tabs_data['Vegetation Index']['enabled']
+smoothing =  tabs_data['Filtering']['enabled']
+contrast_enhancement =  tabs_data['Contrast Enhance']['enabled']
+morphological =  tabs_data['Morphological Refinement']['enabled']
 
 
 processed_image = image
@@ -620,7 +655,7 @@ if morphological:
     processed_image = full_morphological(processed_image)
 
 # Manual thresholding
-threshold = 0.46
+threshold = 0.40
 binary_mask = processed_image > threshold
 
 highlighted_image = image.copy() * 255
