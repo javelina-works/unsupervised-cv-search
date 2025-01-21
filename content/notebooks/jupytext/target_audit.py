@@ -910,9 +910,19 @@ def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, 
 
     draw_control = GeomanDrawControl()
     draw_control.circlemarker = {}
+    draw_control.polygon = {}
+    draw_control.polyline = {}
+    draw_control.rectangle = {
+        "pathOptions": {
+            "weight": 2,
+            "color": "green",
+            "fillOpacity": 0.1
+        }
+    }
     draw_control.rotate = False
-    # draw_control.cut = False
-    draw_control.drag = False
+    draw_control.cut = False
+    draw_control.edit = False
+    draw_control.drag = False # Does not maintain state 
     m.add(draw_control)
 
     # m.add(FullScreenControl(position='topleft'))
