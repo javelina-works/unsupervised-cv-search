@@ -162,11 +162,15 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 
 
 # +
-from ipyleaflet import Map, GeoJSON, TileLayer, GeoData, WidgetControl, LayersControl, ScaleControl, GeomanDrawControl
+from ipyleaflet import (
+    Map, GeoJSON, TileLayer, GeoData, 
+    WidgetControl, LayersControl, ScaleControl, GeomanDrawControl, FullScreenControl
+)
 import param
+import panel as pn
+import pandas as pd
 import json
 from shapely.geometry import shape
-import panel as pn
 
 class MapView(param.Parameterized):
     # region_image_path = param.String(doc="Path to the orthophoto image")
@@ -176,8 +180,11 @@ class MapView(param.Parameterized):
     def __init__(self, **params):
         super().__init__(**params)
         self.map = None
-        self.sample_boxes_gdf = None
-        self.combined_gdf = None
+
+        # Empty copy of targets
+        self.removed_targets_gdf = gpd.GeoDataFrame(columns=self.targets_gdf.columns, geometry='geometry')
+        # self.sample_boxes_gdf = None
+        # self.combined_gdf = None
         self.region_data = None
         self._initialize_region_data()
         self._initialize_map()
@@ -200,8 +207,9 @@ class MapView(param.Parameterized):
 
         self._add_region_outline_layer()
         self._add_targets_layer()
+        self._add_removed_targets_layer()
         self._add_draw_control()
-        self._add_scale_and_layer_controls()
+        self._add_map_controls()
 
     def _add_region_outline_layer(self):
         region_layer = GeoJSON(
@@ -211,15 +219,52 @@ class MapView(param.Parameterized):
         self.map.add(region_layer) # Add the region border to the map
 
     def _add_targets_layer(self):
-        targets_layer = GeoData(
+        self.targets_layer = GeoData(
             geo_dataframe=self.targets_gdf,
-            style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.3},
-            hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+            style={'color': 'black', 'radius':6, 'fillColor': 'blue', 'opacity':0.5, 'weight':1, 'fillOpacity':0.3},
+            hover_style={'fillColor': 'blue' , 'fillOpacity': 0.2},
             point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
             draggable=True,
             name="Identified targets"
             )
-        self.map.add(targets_layer)
+        
+        def on_click_target(event, feature, properties, id):
+            # Move the clicked point to the removed targets layer
+            target_id = properties['target_id']
+            clicked_point = self.targets_gdf[self.targets_gdf['target_id'] == target_id]
+            # Remove from targets_gdf
+            self.targets_gdf = self.targets_gdf[self.targets_gdf['target_id'] != target_id]
+            self.targets_layer.geo_dataframe = self.targets_gdf
+            # Add to removed_targets_gdf
+            self.removed_targets_gdf = pd.concat([self.removed_targets_gdf, clicked_point])
+            self.removed_targets_layer.geo_dataframe = self.removed_targets_gdf
+
+        self.targets_layer.on_click(on_click_target)
+        self.map.add(self.targets_layer)
+
+    def _add_removed_targets_layer(self):
+        self.removed_targets_layer = GeoData(
+            geo_dataframe=self.removed_targets_gdf,
+            style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.3},
+            hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+            point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+            draggable=True,
+            name="Removed targets"
+            )
+        
+        def on_click_removed_target(event, feature, properties, id):
+            # Move the clicked point back to the targets layer
+            target_id = properties['target_id']
+            clicked_point = self.removed_targets_gdf[self.removed_targets_gdf['target_id'] == target_id]
+            # Remove from removed_targets_gdf
+            self.removed_targets_gdf = self.removed_targets_gdf[self.removed_targets_gdf['target_id'] != target_id]
+            self.removed_targets_layer.geo_dataframe = self.removed_targets_gdf
+            # Add back to targets_gdf
+            self.targets_gdf = pd.concat([self.targets_gdf, clicked_point])
+            self.targets_layer.geo_dataframe = self.targets_gdf
+
+        self.removed_targets_layer.on_click(on_click_removed_target)
+        self.map.add(self.removed_targets_layer)
 
     def _add_draw_control(self):
         self.draw_control = GeomanDrawControl()
@@ -236,7 +281,8 @@ class MapView(param.Parameterized):
 
         self.map.add(self.draw_control)
 
-    def _add_scale_and_layer_controls(self):
+    def _add_map_controls(self):
+        self.map.add(FullScreenControl(position='topleft'))
         self.map.add(LayersControl(position="topright"))
         self.map.add(ScaleControl(position="bottomleft"))
 
@@ -246,19 +292,62 @@ class MapView(param.Parameterized):
 import geopandas as gpd
 
 targets_gdf = gpd.read_file(targets_plants_filename)
-targets_points_gdf = targets_gdf[['geometry']] # remove confusing cols
+targets_points_gdf = targets_gdf[['geometry','target_id']] # remove confusing cols
 
 map_view = MapView(
     region_geojson_path = region_contour_geojson,
     targets_gdf = targets_points_gdf
 )
 
-pn.extension()
+# pn.extension()
+pn.extension(design="material")
+
 # pn.Column(map_view.map)
 # pn.panel(map_view.map)
+# pn.panel(map_view.map).servable()
 pn.panel(map_view.map).show()
 
-# targets_points_gdf
+
+def print_latest_value(event):
+    print(f"Targets count: {len(map_view.targets_layer.geo_dataframe)}")
+
+button = pn.widgets.Button(name="Print Latest Value", button_type="primary")
+button.on_click(print_latest_value)
+
+
+# map_panel = pn.pane.IPyWidget(map_view.map)
+# map_panel = pn.panel(map_view.map).servable();
+map_panel = pn.panel(map_view.map)
+
+# pn.template.FastListTemplate(
+#     site="Panel",
+#     title="Getting Started App",
+#     sidebar=[button],
+#     main=[map_panel],
+# ).servable(); # The ; is needed in the notebook to not display the template. Its not needed in a script
+# -
+
+print(len(map_view.targets_layer.data['features']))
+print(len(map_view.targets_gdf))
+
+# +
+print(len(targets_points_gdf))
+# targets_points_gdf['id']
+
+remove_target = '0e66e967-082e-4c39-94b3-50beaf583450'
+targets_points_gdf = targets_points_gdf[targets_points_gdf['target_id'] != remove_target]
+
+print(len(targets_points_gdf))
+
+# +
+# len(map_view.region_data['features'])
+map_view.region_data['features']
+map_view.region_data
+# len(map_view.region_data['features']['geometry']['coordinates'])
+len(map_view.region_data['features'][0]['geometry']['coordinates'])
+map_view.region_data['features'][0]['geometry']['coordinates']
+
+map_view.targets_layer.data
 
 # + vscode={"languageId": "raw"} active=""
 # import param
