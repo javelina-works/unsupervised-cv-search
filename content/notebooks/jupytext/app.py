@@ -162,197 +162,263 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 
 
 # +
-import param
-import json
-from shapely.geometry import shape
-import panel as pn
-from plant_search.verify_targets import get_image_sample_coordinates
+import ipywidgets as widgets
+from IPython.display import display
 
+slider = widgets.IntSlider(value=10, min=0, max=100, step=1, description="Slider:")
+display(slider)
 
-class RegionSampler(param.Parameterized):
-    region_image_path = param.String(doc="Path to the orthophoto image")
-    region_geojson_path = param.String(doc="Path to the GeoJSON file defining the region")
-
-    sample_size = param.Integer(1024, bounds=(512, 4096), step=256, doc="Size of individual samples")
-    num_samples = param.Integer(5, bounds=(1, 12), doc="Number of random samples")
-    save_samples = param.Action(lambda self: self._save_samples(), label="Save Samples")
-    
-    def __init__(self, **params):
-        super().__init__(**params)
-        self.sample_boxes_gdf = None
-        self.get_samples()
-
-    def __call__(self):
-        return self.sample_boxes_gdf
-
-    def get_samples(self):
-        self.sample_boxes_gdf = get_image_sample_coordinates(
-            self.region_image_path, self.sample_size, self.num_samples, self.region_geojson_path
-        )
-        return self.sample_boxes_gdf
-        # return get_image_sample_coordinates(
-        #     self.region_image_path, self.sample_size, self.num_samples, self.region_geojson_path
-        # )
-
-    # @param.depends('sample_size', 'num_samples', watch=True)
-    # def update_samples(self):
-    #     self.sample_boxes_gdf = get_image_sample_coordinates(
-    #         self.region_image_path, self.sample_size, self.num_samples, self.region_geojson_path
-    #     )
-
-# Instantiate and serve the app
-sampler = RegionSampler(
-    region_image_path = region_image_path,
-    region_geojson_path = region_contour_geojson
-)
-
-pn.extension()
-pn.Column(sampler.param, sampler.get_samples)
 
 # +
-from ipyleaflet import (
-    Map, GeoJSON, LayersControl, ScaleControl, 
-    FullScreenControl, GeomanDrawControl,
-    TileLayer, LocalTileLayer, GeoData,
-)
-from ipyleaflet.projections import projections
-from ipywidgets import Layout
+import panel as pn
+import ipywidgets as widgets
 
-from shapely.geometry import shape
-from shapely.wkt import loads
-import json
-import geopandas as gpd
+pn.extension('ipywidgets')
 
-from ipyleaflet.projections import projections
+slider = widgets.IntSlider(value=10, min=0, max=100, step=1, description="Slider:")
+# pn.pane.IPyWidget(slider).show()
+pn.pane.IPyWidget(slider)
 
-def plot_route_on_image(region_geojson, depots_filename, micro_routes_filename, targets_plants_filename):
 
-    # Get image data
-    # image, transform, bounds, image_crs = load_image(orthophoto_path)
+# +
+from ipyleaflet import Map, VideoOverlay
+import panel as pn
+import ipywidgets as ipw
 
-    with open(region_geojson, "r") as f:
-        region_contour_data = json.load(f)
-    region_geometry = shape(region_contour_data['features'][0]['geometry'])
-    region_center = region_geometry.centroid
+pn.extension('ipywidgets')
+# pn.extension()
 
-    with open(depots_filename, "r") as f:
-        depot_data = json.load(f)
+# m = Map(center=(25, -115), zoom=4)
 
-    with open(micro_routes_filename, "r") as f:
-        micro_routes_data = json.load(f)
+# video = VideoOverlay(
+#     url="https://www.mapbox.com/bites/00188/patricia_nasa.webm",
+#     bounds=((13, -130), (32, -100))
+# )
 
-    with open(targets_plants_filename, "r") as f:
-        targets_data = json.load(f)
+# m.add(video);
+# pn.panel(m)
+
+# +
+date   = ipw.DatePicker(description='Date')
+slider = ipw.FloatSlider(description='Float')
+play   = ipw.Play()
+
+layout = ipw.HBox(children=[date, slider, play])
+# layout = pn.Column(
+#     pn.pane.Markdown("# IPyWidgets Example"),
+#     pn.pane.IPyWidget(slider),
+#     pn.pane.IPyWidget(play),
+# )
+
+# pn.panel(layout).show()
+# layout.show()
+pn.panel(layout)
+
+# +
+# from ipyleaflet import Map, GeoJSON, TileLayer, GeoData, WidgetControl, LayersControl, ScaleControl, GeomanDrawControl
+# import param
+# import json
+# from shapely.geometry import shape
+# import panel as pn
+
+# class MapView(param.Parameterized):
+#     # region_image_path = param.String(doc="Path to the orthophoto image")
+#     region_geojson_path = param.String(doc="Path to the GeoJSON file defining the region")
     
-    
-    
-    bboxes_gdf = gpd.read_file(targets_plants_filename) # Read in from file
-    bboxes_gdf['bounding_box'] = bboxes_gdf['bounding_box'].apply(loads) # str to Polygon
-    bboxes_gdf.set_geometry('bounding_box', inplace=True) # It is the primary geometry
-    bboxes_gdf = bboxes_gdf.drop(columns=['region_outline_version', 'geometry']) # remove confusing cols
-    bboxes_gdf = bboxes_gdf.set_crs(region_crs).to_crs(visualization_crs) # Needs CRS, then convert
+#     def __init__(self, **params):
+#         super().__init__(**params)
+#         self.map = None
+#         self.sample_boxes_gdf = None
+#         self.combined_gdf = None
+#         self.region_data = None
+#         self._initialize_region_data()
+#         self._initialize_map()
 
-    
-    # bounding_boxes_gdf = gpd.GeoDataFrame(bboxes_gdf, geometry='geometry', crs=bboxes_gdf.crs)
-    # bounding_boxes_geojson = bounding_boxes_gdf.to_json()
+#     def _initialize_region_data(self):
+#         with open(self.region_geojson_path, "r") as f:
+#             self.region_data = json.load(f)
+#         region_geometry = shape(self.region_data['features'][0]['geometry'])
+#         self.region_center = region_geometry.centroid
 
-    # Set up the map
-    m = Map(center=(region_center.y, region_center.x),
-            zoom=16, scroll_wheel_zoom=True,
-            double_click_zoom=False,
-            layout=Layout(height="700px"),  # Set desired dimensions
-            # crs=projections.EPSG4326
-        )
+#     def _initialize_map(self):
+#         self.map = Map(center=(self.region_center.y, self.region_center.x), zoom=16, scroll_wheel_zoom=True)
 
-    # Add orthophoto overlay
-    tile_layer = TileLayer(
-        url="http://localhost:8000/{z}/{x}/{y}.png",
-        min_zoom=15,
-        max_zoom=22,
-        show_loading=True,
-        max_requests_per_tile=5,  # Adjust as needed
-        name="Region Image")
-    m.add_layer(tile_layer)
+#         # self.tile_layer = TileLayer(
+#         #     url="http://localhost:8000/{z}/{x}/{y}.png",
+#         #     min_zoom=15, max_zoom=22,
+#         #     name="Region Image"
+#         # )
+#         # self.map.add(self.tile_layer)
 
-    # Add the region border to the map
-    region_layer = GeoJSON(
-        data=region_contour_data, 
-        style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
-        name=region_contour_data['name'])
-    m.add(region_layer)
+#         self._add_region_outline_layer()
+#         self._add_draw_control()
+#         self._add_scale_and_layer_controls()
 
-    depot_points = GeoJSON(
-        data=depot_data,
-        style={'color': 'black', 'radius':10, 'fillColor': '#3366cc', 'opacity':0.5, 'weight':1.9, 'dashArray':'2', 'fillOpacity':0.6},
-        hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
-        point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
-        draggable=True,
-        name=depot_data['name']
-    )
-    m.add(depot_points)
-
-    routes_layer = GeoJSON(
-        data=micro_routes_data, 
-        style={'color': 'green', 'fillColor': 'green', 'opacity': 0.75, 'weight': 4},
-        hover_style={'color': 'red' , 'opacity': 0.8, 'weight': 3},
-        name=f'Micro Routes'
-    )
-    # m.add(routes_layer)
-
-    targets_layer = GeoJSON(
-        data=targets_data,
-        style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.6},
-        hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
-        point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
-        draggable=True,
-        name=targets_data['name']
-    )
-    def on_click_target(event, feature, properties):
-        # print(event)
-        # print(feature)
-        # print(properties)
-        # print(len(targets_data['features']))
-        targets_data['features'] = [
-            feature for feature in targets_data['features']
-            if feature['properties']['target_id'] != properties['target_id']
-        ]
-        print(len(targets_data['features']))
-        targets_layer.data = targets_data
-
-    targets_layer.on_click(on_click_target)
+#     def _add_region_outline_layer(self):
+#         # Add the region border to the map
+#         region_layer = GeoJSON(
+#             data=self.region_data, 
+#             style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+#             name=self.region_data['name'])
+#         self.map.add(region_layer)
 
 
-    m.add(targets_layer)
+#     def _add_draw_control(self):
+#         self.draw_control = GeomanDrawControl()
+#         self.draw_control.rectangle = {"pathOptions": {"weight": 2, "color": "green", "fillOpacity": 0.1}}
+#         self.map.add(self.draw_control)
 
-    bboxes_layer = GeoData(geo_dataframe = bboxes_gdf,
-                   style={'color': 'red', 'opacity':0.5, 'weight':1.9,
-                          'fill': False, 'fillColor': 'red', 'fillOpacity': 0.2
-                          },
-                   hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
-                   name = 'Countries')
-    # m.add(bboxes_layer)
+#     def _add_scale_and_layer_controls(self):
+#         self.map.add(LayersControl(position="topright"))
+#         self.map.add(ScaleControl(position="bottomleft"))
 
-    draw_control = GeomanDrawControl()
-    draw_control.circlemarker = {}
-    draw_control.polygon = {}
-    draw_control.polyline = {}
-    draw_control.rectangle = {
-        "pathOptions": {
-            "weight": 2,
-            "color": "green",
-            "fillOpacity": 0.1
-        }
-    }
-    draw_control.rotate = False
-    draw_control.cut = False
-    draw_control.edit = False
-    draw_control.drag = False # Does not maintain state 
-    m.add(draw_control)
+# map_view = MapView(
+#     region_geojson_path = region_contour_geojson
+# )
 
-    # m.add(FullScreenControl(position='topleft'))
-    m.add(LayersControl(position='topright'))
-    m.add(ScaleControl(position='bottomleft'))
-    return m
+# pn.extension()
+# # pn.Column(map_view.map)
+# pn.panel(map_view.map)
 
-m = plot_route_on_image(region_contour_geojson, depots_filename, micro_routes_filename, targets_plants_filename)
-m
+
+# + vscode={"languageId": "raw"} active=""
+# import param
+# import json
+# from shapely.geometry import shape
+# import panel as pn
+# from plant_search.verify_targets import get_image_sample_coordinates
+#
+#
+# class RegionSampler(param.Parameterized):
+#     region_image_path = param.String(doc="Path to the orthophoto image")
+#     region_geojson_path = param.String(doc="Path to the GeoJSON file defining the region")
+#
+#     sample_size = param.Integer(1024, bounds=(512, 4096), step=256, doc="Size of individual samples")
+#     num_samples = param.Integer(5, bounds=(1, 12), doc="Number of random samples")
+#     save_samples = param.Action(lambda self: self._save_samples(), label="Save Samples")
+#     
+#     def __init__(self, **params):
+#         super().__init__(**params)
+#         self.sample_boxes_gdf = None
+#         self.get_samples()
+#
+#     def __call__(self):
+#         return self.sample_boxes_gdf
+#
+#     def get_samples(self):
+#         self.sample_boxes_gdf = get_image_sample_coordinates(
+#             self.region_image_path, self.sample_size, self.num_samples, self.region_geojson_path
+#         )
+#         return self.sample_boxes_gdf
+#         # return get_image_sample_coordinates(
+#         #     self.region_image_path, self.sample_size, self.num_samples, self.region_geojson_path
+#         # )
+#
+#     # @param.depends('sample_size', 'num_samples', watch=True)
+#     # def update_samples(self):
+#     #     self.sample_boxes_gdf = get_image_sample_coordinates(
+#     #         self.region_image_path, self.sample_size, self.num_samples, self.region_geojson_path
+#     #     )
+#
+# # Instantiate and serve the app
+# sampler = RegionSampler(
+#     region_image_path = region_image_path,
+#     region_geojson_path = region_contour_geojson
+# )
+#
+# pn.extension()
+# pn.Column(sampler.param, sampler.get_samples)
+
+# + vscode={"languageId": "raw"} active=""
+# from ipyleaflet import (
+#     Map, GeoJSON, LayersControl, ScaleControl, 
+#     FullScreenControl, GeomanDrawControl,
+#     TileLayer, LocalTileLayer, GeoData,
+# )
+# from ipyleaflet.projections import projections
+# from ipywidgets import Layout
+#
+# from shapely.geometry import shape
+# from shapely.wkt import loads
+# import json
+# import geopandas as gpd
+#
+# from ipyleaflet.projections import projections
+#
+# def plot_targets_on_map(region_geojson, targets_gdf):
+#
+#     # Get image data
+#     # image, transform, bounds, image_crs = load_image(orthophoto_path)
+#
+#     with open(region_geojson, "r") as f:
+#         region_contour_data = json.load(f)
+#     region_geometry = shape(region_contour_data['features'][0]['geometry'])
+#     region_center = region_geometry.centroid
+#
+#     # Set up the map
+#     m = Map(center=(region_center.y, region_center.x),
+#             zoom=16, scroll_wheel_zoom=True,
+#             double_click_zoom=False,
+#             layout=Layout(height="700px"),  # Set desired dimensions
+#             # crs=projections.EPSG4326
+#         )
+#
+#     # Add orthophoto overlay
+#     tile_layer = TileLayer(
+#         url="http://localhost:8000/{z}/{x}/{y}.png",
+#         min_zoom=15,
+#         max_zoom=22,
+#         show_loading=True,
+#         max_requests_per_tile=5,  # Adjust as needed
+#         name="Region Image")
+#     m.add_layer(tile_layer)
+#
+#     # Add the region border to the map
+#     region_layer = GeoJSON(
+#         data=region_contour_data, 
+#         style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+#         name=region_contour_data['name'])
+#     m.add(region_layer)
+#
+#
+#     targets_points_gdf = targets_gdf.copy()
+#     targets_points_gdf = targets_points_gdf.drop(columns=['bounding_box']) # remove confusing cols
+#
+#     targets_layer = GeoData(geo_dataframe = targets_points_gdf,
+#                             style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.3},
+#                             hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+#                             point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+#                             draggable=True,
+#                             name="Identified targets"
+#                             )
+#     m.add(targets_layer)
+#
+#
+#     bboxes_gdf = targets_gdf.copy()
+#     # bboxes_gdf['bounding_box'] = bboxes_gdf['bounding_box'].apply(loads) # str to Polygon
+#     bboxes_gdf.set_geometry('bounding_box', inplace=True) # It is the primary geometry
+#     bboxes_gdf = bboxes_gdf.drop(columns=['geometry']) # remove confusing cols
+#     # bboxes_gdf = bboxes_gdf.set_crs(region_crs).to_crs(visualization_crs) # Needs CRS, then convert
+#
+#     bboxes_layer = GeoData(geo_dataframe = bboxes_gdf,
+#                    style={'color': 'red', 'opacity':0.5, 'weight':1.9,
+#                           'fill': False, 'fillColor': 'red', 'fillOpacity': 0.2 },
+#                    hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
+#                    name = 'Target bounding boxes')
+#     m.add(bboxes_layer)
+#
+#
+#     draw_control = GeomanDrawControl()
+#     draw_control.circlemarker = {}
+#     draw_control.rotate = False
+#     # draw_control.cut = False
+#     draw_control.drag = False
+#     m.add(draw_control)
+#
+#     # m.add(FullScreenControl(position='topleft'))
+#     m.add(LayersControl(position='topright'))
+#     m.add(ScaleControl(position='bottomleft'))
+#     return m
+#
+# m = plot_targets_on_map(region_contour_geojson, targets_gdf)
+# m
