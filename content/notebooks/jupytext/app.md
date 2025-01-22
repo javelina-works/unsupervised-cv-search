@@ -165,128 +165,104 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 ```
 
 ```python
-import ipywidgets as widgets
-from IPython.display import display
-
-slider = widgets.IntSlider(value=10, min=0, max=100, step=1, description="Slider:")
-display(slider)
-
-```
-
-```python
+from ipyleaflet import Map, GeoJSON, TileLayer, GeoData, WidgetControl, LayersControl, ScaleControl, GeomanDrawControl
+import param
+import json
+from shapely.geometry import shape
 import panel as pn
-import ipywidgets as widgets
 
-pn.extension('ipywidgets')
+class MapView(param.Parameterized):
+    # region_image_path = param.String(doc="Path to the orthophoto image")
+    region_geojson_path = param.String(doc="Path to the GeoJSON file defining the region")
+    targets_gdf = param.Parameter(default=None, doc="GeoPandas DF of potential targets")
 
-slider = widgets.IntSlider(value=10, min=0, max=100, step=1, description="Slider:")
-# pn.pane.IPyWidget(slider).show()
-pn.pane.IPyWidget(slider)
+    def __init__(self, **params):
+        super().__init__(**params)
+        self.map = None
+        self.sample_boxes_gdf = None
+        self.combined_gdf = None
+        self.region_data = None
+        self._initialize_region_data()
+        self._initialize_map()
+
+    def _initialize_region_data(self):
+        with open(self.region_geojson_path, "r") as f:
+            self.region_data = json.load(f)
+        region_geometry = shape(self.region_data['features'][0]['geometry'])
+        self.region_center = region_geometry.centroid
+
+    def _initialize_map(self):
+        self.map = Map(center=(self.region_center.y, self.region_center.x), zoom=16, scroll_wheel_zoom=True)
+
+        # self.tile_layer = TileLayer(
+        #     url="http://localhost:8000/{z}/{x}/{y}.png",
+        #     min_zoom=15, max_zoom=22,
+        #     name="Region Image"
+        # )
+        # self.map.add(self.tile_layer)
+
+        self._add_region_outline_layer()
+        self._add_targets_layer()
+        self._add_draw_control()
+        self._add_scale_and_layer_controls()
+
+    def _add_region_outline_layer(self):
+        region_layer = GeoJSON(
+            data=self.region_data, 
+            style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
+            name=self.region_data['name'])
+        self.map.add(region_layer) # Add the region border to the map
+
+    def _add_targets_layer(self):
+        targets_layer = GeoData(
+            geo_dataframe=self.targets_gdf,
+            style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.3},
+            hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
+            point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+            draggable=True,
+            name="Identified targets"
+            )
+        self.map.add(targets_layer)
+
+    def _add_draw_control(self):
+        self.draw_control = GeomanDrawControl()
+        
+        self.draw_control.circlemarker = {}
+        self.draw_control.polygon = {}
+        self.draw_control.polyline = {}
+        self.draw_control.rectangle = {"pathOptions": {"weight": 2, "color": "green", "fillOpacity": 0.1}}
+        
+        self.draw_control.rotate = False
+        self.draw_control.cut = False
+        self.draw_control.edit = False
+        self.draw_control.drag = False # Does not maintain state 
+
+        self.map.add(self.draw_control)
+
+    def _add_scale_and_layer_controls(self):
+        self.map.add(LayersControl(position="topright"))
+        self.map.add(ScaleControl(position="bottomleft"))
+
 
 ```
 
 ```python
-from ipyleaflet import Map, VideoOverlay
-import panel as pn
-import ipywidgets as ipw
+import geopandas as gpd
 
-pn.extension('ipywidgets')
-# pn.extension()
+targets_gdf = gpd.read_file(targets_plants_filename)
+targets_points_gdf = targets_gdf[['geometry']] # remove confusing cols
 
-# m = Map(center=(25, -115), zoom=4)
+map_view = MapView(
+    region_geojson_path = region_contour_geojson,
+    targets_gdf = targets_points_gdf
+)
 
-# video = VideoOverlay(
-#     url="https://www.mapbox.com/bites/00188/patricia_nasa.webm",
-#     bounds=((13, -130), (32, -100))
-# )
-
-# m.add(video);
-# pn.panel(m)
-```
-
-```python
-date   = ipw.DatePicker(description='Date')
-slider = ipw.FloatSlider(description='Float')
-play   = ipw.Play()
-
-layout = ipw.HBox(children=[date, slider, play])
-# layout = pn.Column(
-#     pn.pane.Markdown("# IPyWidgets Example"),
-#     pn.pane.IPyWidget(slider),
-#     pn.pane.IPyWidget(play),
-# )
-
-# pn.panel(layout).show()
-# layout.show()
-pn.panel(layout)
-```
-
-```python
-# from ipyleaflet import Map, GeoJSON, TileLayer, GeoData, WidgetControl, LayersControl, ScaleControl, GeomanDrawControl
-# import param
-# import json
-# from shapely.geometry import shape
-# import panel as pn
-
-# class MapView(param.Parameterized):
-#     # region_image_path = param.String(doc="Path to the orthophoto image")
-#     region_geojson_path = param.String(doc="Path to the GeoJSON file defining the region")
-    
-#     def __init__(self, **params):
-#         super().__init__(**params)
-#         self.map = None
-#         self.sample_boxes_gdf = None
-#         self.combined_gdf = None
-#         self.region_data = None
-#         self._initialize_region_data()
-#         self._initialize_map()
-
-#     def _initialize_region_data(self):
-#         with open(self.region_geojson_path, "r") as f:
-#             self.region_data = json.load(f)
-#         region_geometry = shape(self.region_data['features'][0]['geometry'])
-#         self.region_center = region_geometry.centroid
-
-#     def _initialize_map(self):
-#         self.map = Map(center=(self.region_center.y, self.region_center.x), zoom=16, scroll_wheel_zoom=True)
-
-#         # self.tile_layer = TileLayer(
-#         #     url="http://localhost:8000/{z}/{x}/{y}.png",
-#         #     min_zoom=15, max_zoom=22,
-#         #     name="Region Image"
-#         # )
-#         # self.map.add(self.tile_layer)
-
-#         self._add_region_outline_layer()
-#         self._add_draw_control()
-#         self._add_scale_and_layer_controls()
-
-#     def _add_region_outline_layer(self):
-#         # Add the region border to the map
-#         region_layer = GeoJSON(
-#             data=self.region_data, 
-#             style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
-#             name=self.region_data['name'])
-#         self.map.add(region_layer)
-
-
-#     def _add_draw_control(self):
-#         self.draw_control = GeomanDrawControl()
-#         self.draw_control.rectangle = {"pathOptions": {"weight": 2, "color": "green", "fillOpacity": 0.1}}
-#         self.map.add(self.draw_control)
-
-#     def _add_scale_and_layer_controls(self):
-#         self.map.add(LayersControl(position="topright"))
-#         self.map.add(ScaleControl(position="bottomleft"))
-
-# map_view = MapView(
-#     region_geojson_path = region_contour_geojson
-# )
-
-# pn.extension()
-# # pn.Column(map_view.map)
+pn.extension()
+# pn.Column(map_view.map)
 # pn.panel(map_view.map)
+pn.panel(map_view.map).show()
 
+# targets_points_gdf
 ```
 
 <!-- #raw vscode={"languageId": "raw"} -->
