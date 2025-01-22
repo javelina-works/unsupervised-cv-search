@@ -169,6 +169,8 @@ from ipyleaflet import (
     Map, GeoJSON, TileLayer, GeoData, 
     WidgetControl, LayersControl, ScaleControl, GeomanDrawControl, FullScreenControl
 )
+from panel.widgets import Button
+import ipywidgets
 import param
 import panel as pn
 import pandas as pd
@@ -183,11 +185,10 @@ class MapView(param.Parameterized):
     def __init__(self, **params):
         super().__init__(**params)
         self.map = None
-
-        # Empty copy of targets
         self.removed_targets_gdf = gpd.GeoDataFrame(columns=self.targets_gdf.columns, geometry='geometry')
         # self.sample_boxes_gdf = None
         # self.combined_gdf = None
+        self.drawn_rectangles = []
         self.region_data = None
         self._initialize_region_data()
         self._initialize_map()
@@ -207,6 +208,10 @@ class MapView(param.Parameterized):
         #     name="Region Image"
         # )
         # self.map.add(self.tile_layer)
+
+        button = ipywidgets.Button(description="Process Rectangles", button_type="primary")
+        button.on_click(self._process_rectangles)
+        self.map.add(WidgetControl(widget=button, position='bottomright'))
 
         self._add_region_outline_layer()
         self._add_targets_layer()
@@ -256,14 +261,13 @@ class MapView(param.Parameterized):
             )
         
         def on_click_removed_target(event, feature, properties, id):
-            # Move the clicked point back to the targets layer
             target_id = properties['target_id']
             clicked_point = self.removed_targets_gdf[self.removed_targets_gdf['target_id'] == target_id]
-            # Remove from removed_targets_gdf
+
             self.removed_targets_gdf = self.removed_targets_gdf[self.removed_targets_gdf['target_id'] != target_id]
-            self.removed_targets_layer.geo_dataframe = self.removed_targets_gdf
-            # Add back to targets_gdf
-            self.targets_gdf = pd.concat([self.targets_gdf, clicked_point])
+            self.removed_targets_layer.geo_dataframe = self.removed_targets_gdf # Remove from removed_targets_gdf
+            
+            self.targets_gdf = pd.concat([self.targets_gdf, clicked_point]) # Add back to targets_gdf
             self.targets_layer.geo_dataframe = self.targets_gdf
 
         self.removed_targets_layer.on_click(on_click_removed_target)
@@ -281,6 +285,7 @@ class MapView(param.Parameterized):
         self.draw_control.cut = False
         self.draw_control.edit = False
         self.draw_control.drag = False # Does not maintain state 
+        self.draw_control.remove = False # Swap GDFs, don't remove
 
         self.map.add(self.draw_control)
 
@@ -288,6 +293,40 @@ class MapView(param.Parameterized):
         self.map.add(FullScreenControl(position='topleft'))
         self.map.add(LayersControl(position="topright"))
         self.map.add(ScaleControl(position="bottomleft"))
+
+    def _process_rectangles(self, event):
+        """
+        Process drawn rectangles to move points and clear rectangles.
+        """
+        # Check if there are any drawn geometries
+        if not self.draw_control.data or not isinstance(self.draw_control.data, list):
+            # print("No rectangles found or draw control data is invalid.")
+            return
+
+        # Extract valid geometries from draw control data
+        drawn_geometries = [
+            shape(item["geometry"])
+            for item in self.draw_control.data
+            if "geometry" in item
+        ]
+
+        if not drawn_geometries:
+            # print("No valid rectangles were drawn.")
+            return # Exit early if no valid geometries are found
+
+        for rectangle in drawn_geometries:
+            points_in_rectangle = self.targets_gdf[self.targets_gdf.geometry.within(rectangle)]
+            
+            # Move points to removed_targets_gdf
+            self.removed_targets_gdf = pd.concat([self.removed_targets_gdf, points_in_rectangle])
+            
+            # Remove those points from targets_gdf
+            self.targets_gdf = self.targets_gdf[~self.targets_gdf.geometry.within(rectangle)]
+            
+        self.targets_layer.geo_dataframe = self.targets_gdf # Update the layers
+        self.removed_targets_layer.geo_dataframe = self.removed_targets_gdf
+        
+        self.draw_control.clear() # Clear the drawn rectangles
 
 
 ```
@@ -332,18 +371,13 @@ map_panel = pn.panel(map_view.map)
 ```
 
 ```python
-print(len(map_view.targets_layer.data['features']))
-print(len(map_view.targets_gdf))
+map_view.draw_control.data
+print(len(map_view.draw_control.data))
 ```
 
 ```python
-print(len(targets_points_gdf))
-# targets_points_gdf['id']
-
-remove_target = '0e66e967-082e-4c39-94b3-50beaf583450'
-targets_points_gdf = targets_points_gdf[targets_points_gdf['target_id'] != remove_target]
-
-print(len(targets_points_gdf))
+print(len(map_view.targets_layer.data['features']))
+print(len(map_view.targets_gdf))
 ```
 
 ```python
