@@ -409,23 +409,21 @@ download_row = pn.Row(
 layout = pn.Column(
     map_panel,
     download_row
-).show()
+)
 
+
+dummy_button = pn.widgets.Button()
 
 # map_panel = pn.pane.IPyWidget(map_view.map)
 # map_panel = pn.panel(map_view.map).servable();
 # map_panel = pn.panel(map_view.map)
 
-# pn.template.FastListTemplate(
-#     site="Panel",
-#     title="Getting Started App",
-#     sidebar=[button],
-#     main=[map_panel],
-# ).servable(); # The ; is needed in the notebook to not display the template. Its not needed in a script
-# -
-
-map_view.draw_control.data
-print(len(map_view.draw_control.data))
+pn.template.FastListTemplate(
+    site="Panel",
+    title="Getting Started App",
+    sidebar=[dummy_button],
+    main=[layout],
+).servable(); # The ; is needed in the notebook to not display the template. Its not needed in a script
 
 # + vscode={"languageId": "raw"} active=""
 # import param
