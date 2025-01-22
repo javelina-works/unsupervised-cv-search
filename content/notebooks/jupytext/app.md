@@ -167,7 +167,8 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 ```python
 from ipyleaflet import (
     Map, GeoJSON, TileLayer, GeoData, 
-    WidgetControl, LayersControl, ScaleControl, GeomanDrawControl, FullScreenControl
+    WidgetControl, LayersControl, ScaleControl, 
+    GeomanDrawControl, FullScreenControl, ZoomControl
 )
 from panel.widgets import Button
 import ipywidgets
@@ -209,15 +210,13 @@ class MapView(param.Parameterized):
         # )
         # self.map.add(self.tile_layer)
 
-        button = ipywidgets.Button(description="Process Rectangles", button_type="primary")
-        button.on_click(self._process_rectangles)
-        self.map.add(WidgetControl(widget=button, position='bottomright'))
-
         self._add_region_outline_layer()
         self._add_targets_layer()
         self._add_removed_targets_layer()
-        self._add_draw_control()
         self._add_map_controls()
+        self._add_draw_control()
+        self._add_mass_remove_button()
+        self._add_save_targets_button()
 
     def _add_region_outline_layer(self):
         region_layer = GeoJSON(
@@ -290,44 +289,53 @@ class MapView(param.Parameterized):
         self.map.add(self.draw_control)
 
     def _add_map_controls(self):
+        # self.map.add(ZoomControl(position='bottomleft'))
         self.map.add(FullScreenControl(position='topleft'))
         self.map.add(LayersControl(position="topright"))
         self.map.add(ScaleControl(position="bottomleft"))
 
-    def _process_rectangles(self, event):
-        """
-        Process drawn rectangles to move points and clear rectangles.
-        """
-        # Check if there are any drawn geometries
-        if not self.draw_control.data or not isinstance(self.draw_control.data, list):
-            # print("No rectangles found or draw control data is invalid.")
-            return
+    def _add_mass_remove_button(self):
+        self.button = ipywidgets.Button(
+            description="Process Rectangles", 
+            tooltip="Remove all targets in selections",  # Tooltip text
+            icon="rectangle-xmark"
+        )
 
-        # Extract valid geometries from draw control data
-        drawn_geometries = [
-            shape(item["geometry"])
-            for item in self.draw_control.data
-            if "geometry" in item
-        ]
+        def process_rectangles(event):
+            if not self.draw_control.data or not isinstance(self.draw_control.data, list):
+                print("no drawn")
+                return # No drawn geometries
+            drawn_geometries = [
+                shape(item["geometry"])
+                for item in self.draw_control.data # Extract valid geometries from draw control data
+                if "geometry" in item
+            ]
+            if not drawn_geometries:
+                print("no valid drawn")
+                return # Exit early if no valid geometries are found
+            
+            all_selections = gpd.GeoSeries(drawn_geometries).union_all() # Combine selections
+            points_in_selections = self.targets_gdf[self.targets_gdf.geometry.within(all_selections)]
+            if points_in_selections.empty:
+                return # No points found within the drawn rectangles
 
-        if not drawn_geometries:
-            # print("No valid rectangles were drawn.")
-            return # Exit early if no valid geometries are found
+            self.removed_targets_gdf = pd.concat([self.removed_targets_gdf, points_in_selections])
+            self.targets_gdf = self.targets_gdf[~self.targets_gdf.index.isin(points_in_selections.index)]
 
-        for rectangle in drawn_geometries:
-            points_in_rectangle = self.targets_gdf[self.targets_gdf.geometry.within(rectangle)]
-            
-            # Move points to removed_targets_gdf
-            self.removed_targets_gdf = pd.concat([self.removed_targets_gdf, points_in_rectangle])
-            
-            # Remove those points from targets_gdf
-            self.targets_gdf = self.targets_gdf[~self.targets_gdf.geometry.within(rectangle)]
-            
-        self.targets_layer.geo_dataframe = self.targets_gdf # Update the layers
-        self.removed_targets_layer.geo_dataframe = self.removed_targets_gdf
+            self.targets_layer.geo_dataframe = self.targets_gdf # Update the layers
+            self.removed_targets_layer.geo_dataframe = self.removed_targets_gdf
+            self.draw_control.clear() # Clear the drawn rectangles
+    
+        self.button.on_click(process_rectangles)
+        self.map.add(WidgetControl(widget=self.button, position='bottomright'))
+
+    def _add_save_targets_button(self):
+        button = ipywidgets.Button(description="Save Targets", icon="file-lines")
+        def click_save_targets(event):
+            print("Save targets!")
         
-        self.draw_control.clear() # Clear the drawn rectangles
-
+        button.on_click(click_save_targets)
+        self.map.add(WidgetControl(widget=button, position='bottomright'))
 
 ```
 
