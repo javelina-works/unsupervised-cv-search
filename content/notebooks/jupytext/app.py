@@ -213,7 +213,6 @@ class MapView(param.Parameterized):
         self._add_map_controls()
         self._add_draw_control()
         self._add_mass_remove_button()
-        self._add_save_targets_button()
 
     def _add_region_outline_layer(self):
         region_layer = GeoJSON(
@@ -326,18 +325,50 @@ class MapView(param.Parameterized):
         self.button.on_click(process_rectangles)
         self.map.add(WidgetControl(widget=self.button, position='bottomright'))
 
-    def _add_save_targets_button(self):
-        button = ipywidgets.Button(description="Save Targets", icon="file-lines")
-        def click_save_targets(event):
-            print("Save targets!")
-        
-        button.on_click(click_save_targets)
-        self.map.add(WidgetControl(widget=button, position='bottomright'))
 
+# +
+import geopandas as gpd
+import panel as pn
+from io import BytesIO
+
+class DownloadGeoJSON(param.Parameterized):
+    # Parameter to hold the GeoDataFrame
+    source_gdf = param.ClassSelector(class_=gpd.GeoDataFrame, default=None, allow_None=True)
+    filename = param.String(default="output.geojson")
+    button_type = param.String(default="primary")
+    name = param.String(default="Download")
+
+    def get_geojson_file(self):
+        """
+        Convert the current GeoDataFrame (source_gdf) to a GeoJSON string for download.
+        """
+        if self.source_gdf is None:
+            print("No GeoDataFrame is set!")
+            return BytesIO()  # Return an empty file
+        bio = BytesIO()
+        self.source_gdf.to_file(bio, driver="GeoJSON")
+        bio.seek(0)
+        return bio
+
+    @param.depends("source_gdf", "filename", "button_type", "name")
+    def download_widget(self):
+        """
+        Return a FileDownload widget based on the current state of the parameters.
+        """
+        return pn.widgets.FileDownload(
+            callback=lambda: self.get_geojson_file(),
+            filename=self.filename,
+            button_type=self.button_type,
+            name=self.name
+        )
 
 
 # +
 import geopandas as gpd
+
+# pn.extension()
+pn.extension(design="material")
+
 
 targets_gdf = gpd.read_file(targets_plants_filename)
 targets_points_gdf = targets_gdf[['geometry','target_id']] # remove confusing cols
@@ -347,25 +378,43 @@ map_view = MapView(
     targets_gdf = targets_points_gdf
 )
 
-# pn.extension()
-pn.extension(design="material")
 
-# pn.Column(map_view.map)
-# pn.panel(map_view.map)
-# pn.panel(map_view.map).servable()
-pn.panel(map_view.map).show()
+# map_panel = pn.pane.IPyWidget(map_view.map)
+map_panel = pn.panel(map_view.map)
 
+# Instantiate the parameterized class for targets
+download_targets = DownloadGeoJSON(
+    source_gdf=map_view.targets_gdf,
+    filename="targets.geojson",
+    button_type="primary",
+    name="Download Targets"
+)
 
-def print_latest_value(event):
-    print(f"Targets count: {len(map_view.targets_layer.geo_dataframe)}")
+# Instantiate the parameterized class for removed targets
+download_removed_targets = DownloadGeoJSON(
+    source_gdf=map_view.removed_targets_gdf,
+    filename="removed_targets.geojson",
+    button_type="warning",
+    name="Download Removed Targets"
+)
 
-button = pn.widgets.Button(name="Print Latest Value", button_type="primary")
-button.on_click(print_latest_value)
+download_row = pn.Row(
+    "# Parameterized GeoJSON Downloads",
+    download_targets.download_widget,
+    download_removed_targets.download_widget,
+    width=400
+)
+
+# Layout
+layout = pn.Column(
+    map_panel,
+    download_row
+).show()
 
 
 # map_panel = pn.pane.IPyWidget(map_view.map)
 # map_panel = pn.panel(map_view.map).servable();
-map_panel = pn.panel(map_view.map)
+# map_panel = pn.panel(map_view.map)
 
 # pn.template.FastListTemplate(
 #     site="Panel",
@@ -377,19 +426,6 @@ map_panel = pn.panel(map_view.map)
 
 map_view.draw_control.data
 print(len(map_view.draw_control.data))
-
-print(len(map_view.targets_layer.data['features']))
-print(len(map_view.targets_gdf))
-
-# +
-# len(map_view.region_data['features'])
-map_view.region_data['features']
-map_view.region_data
-# len(map_view.region_data['features']['geometry']['coordinates'])
-len(map_view.region_data['features'][0]['geometry']['coordinates'])
-map_view.region_data['features'][0]['geometry']['coordinates']
-
-map_view.targets_layer.data
 
 # + vscode={"languageId": "raw"} active=""
 # import param
@@ -438,97 +474,3 @@ map_view.targets_layer.data
 #
 # pn.extension()
 # pn.Column(sampler.param, sampler.get_samples)
-
-# + vscode={"languageId": "raw"} active=""
-# from ipyleaflet import (
-#     Map, GeoJSON, LayersControl, ScaleControl, 
-#     FullScreenControl, GeomanDrawControl,
-#     TileLayer, LocalTileLayer, GeoData,
-# )
-# from ipyleaflet.projections import projections
-# from ipywidgets import Layout
-#
-# from shapely.geometry import shape
-# from shapely.wkt import loads
-# import json
-# import geopandas as gpd
-#
-# from ipyleaflet.projections import projections
-#
-# def plot_targets_on_map(region_geojson, targets_gdf):
-#
-#     # Get image data
-#     # image, transform, bounds, image_crs = load_image(orthophoto_path)
-#
-#     with open(region_geojson, "r") as f:
-#         region_contour_data = json.load(f)
-#     region_geometry = shape(region_contour_data['features'][0]['geometry'])
-#     region_center = region_geometry.centroid
-#
-#     # Set up the map
-#     m = Map(center=(region_center.y, region_center.x),
-#             zoom=16, scroll_wheel_zoom=True,
-#             double_click_zoom=False,
-#             layout=Layout(height="700px"),  # Set desired dimensions
-#             # crs=projections.EPSG4326
-#         )
-#
-#     # Add orthophoto overlay
-#     tile_layer = TileLayer(
-#         url="http://localhost:8000/{z}/{x}/{y}.png",
-#         min_zoom=15,
-#         max_zoom=22,
-#         show_loading=True,
-#         max_requests_per_tile=5,  # Adjust as needed
-#         name="Region Image")
-#     m.add_layer(tile_layer)
-#
-#     # Add the region border to the map
-#     region_layer = GeoJSON(
-#         data=region_contour_data, 
-#         style={'color': 'blue', 'fillOpacity': 0.05, 'weight': 2},
-#         name=region_contour_data['name'])
-#     m.add(region_layer)
-#
-#
-#     targets_points_gdf = targets_gdf.copy()
-#     targets_points_gdf = targets_points_gdf.drop(columns=['bounding_box']) # remove confusing cols
-#
-#     targets_layer = GeoData(geo_dataframe = targets_points_gdf,
-#                             style={'color': 'black', 'radius':6, 'fillColor': 'red', 'opacity':0.5, 'weight':1, 'fillOpacity':0.3},
-#                             hover_style={'fillColor': 'red' , 'fillOpacity': 0.2},
-#                             point_style={'radius': 3, 'color': 'red', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
-#                             draggable=True,
-#                             name="Identified targets"
-#                             )
-#     m.add(targets_layer)
-#
-#
-#     bboxes_gdf = targets_gdf.copy()
-#     # bboxes_gdf['bounding_box'] = bboxes_gdf['bounding_box'].apply(loads) # str to Polygon
-#     bboxes_gdf.set_geometry('bounding_box', inplace=True) # It is the primary geometry
-#     bboxes_gdf = bboxes_gdf.drop(columns=['geometry']) # remove confusing cols
-#     # bboxes_gdf = bboxes_gdf.set_crs(region_crs).to_crs(visualization_crs) # Needs CRS, then convert
-#
-#     bboxes_layer = GeoData(geo_dataframe = bboxes_gdf,
-#                    style={'color': 'red', 'opacity':0.5, 'weight':1.9,
-#                           'fill': False, 'fillColor': 'red', 'fillOpacity': 0.2 },
-#                    hover_style={'color': 'red' , 'opacity': 1.0, 'fill': False},
-#                    name = 'Target bounding boxes')
-#     m.add(bboxes_layer)
-#
-#
-#     draw_control = GeomanDrawControl()
-#     draw_control.circlemarker = {}
-#     draw_control.rotate = False
-#     # draw_control.cut = False
-#     draw_control.drag = False
-#     m.add(draw_control)
-#
-#     # m.add(FullScreenControl(position='topleft'))
-#     m.add(LayersControl(position='topright'))
-#     m.add(ScaleControl(position='bottomleft'))
-#     return m
-#
-# m = plot_targets_on_map(region_contour_geojson, targets_gdf)
-# m
