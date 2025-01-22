@@ -46,6 +46,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from io import BytesIO
 import json
+from PIL import Image
 
 pn.extension('filedropper')
 
@@ -59,7 +60,8 @@ class TargetAuditApp(param.Parameterized):
 
     # Accepted filetypes bug for this widget: https://github.com/holoviz/panel/issues/7153
     # accepted_filetypes=["allowed/geojson", ".geojson"],
-    image_dropper = pn.widgets.FileDropper(height=100, max_file_size ="500MB")
+    # Unable to handle our large geoTiff images
+    image_dropper = pn.widgets.FileDropper(height=100, max_file_size ="500MB", chunk_size=30000000)
     geojson_dropper = pn.widgets.FileDropper(height=100, max_file_size ="100MB")
 
     def __init__(self, **params):
@@ -72,7 +74,9 @@ class TargetAuditApp(param.Parameterized):
     # Update methods for parameters
     def _update_region_image(self, event):
         if event.new:
-            self.region_image = event.new[0]  # Use the first file uploaded
+            first_file_name = list(event.new.keys())[0] # Dict of file names:bytes
+            image_stream  = BytesIO(event.new[first_file_name]) # Bytes to Stream
+            self.region_image = Image.open(image_stream)  # Stream to PIL image
 
     def _update_region_geojson(self, event):
         if event.new:
@@ -84,10 +88,9 @@ class TargetAuditApp(param.Parameterized):
     def view_image(self):
         if self.region_image:
             try:
-                image_data = BytesIO(self.region_image["content"])
-                fig, ax = plt.subplots(figsize=(8, 8))
-                img = plt.imread(image_data)
-                ax.imshow(img)
+                image_data = self.region_image
+                fig, ax = plt.subplots(figsize=(4, 4))
+                ax.imshow(image_data)
                 ax.axis('off')
                 return pn.pane.Matplotlib(fig)
             except Exception as e:
@@ -100,13 +103,6 @@ class TargetAuditApp(param.Parameterized):
         if self.region_geojson:
             try:
                 return pn.pane.JSON(self.region_geojson, depth=2, name="Uploaded GeoJSON")
-                return f"{self.region_geojson}"
-                # region_contour_data = self.region_geojson.decode("utf-8")
-                # return f"{region_contour_data}"
-                geojson_data = BytesIO(self.region_geojson["content"])
-                gdf = gpd.read_file(geojson_data)
-                print(gdf)  # Print the GeoDataFrame to the console
-                return f"GeoJSON loaded successfully. Number of features: {len(gdf)}"
             except Exception as e:
                 return f"Error processing GeoJSON: {e}"
         else:
@@ -133,7 +129,5 @@ target_audit_app.panel().servable()
 target_audit_app.panel()
 # -
 
-target_audit_app.geojson_dropper.value
-
-target_audit_app.region_geojson
-type(target_audit_app.region_geojson)
+if target_audit_app.region_image:
+    print(target_audit_app.region_image.size)
