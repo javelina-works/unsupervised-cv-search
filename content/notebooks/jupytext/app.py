@@ -188,20 +188,11 @@ class UploadRegionFiles(param.Parameterized):
         )
 
 
-# Run the app
-target_audit_app = UploadRegionFiles(
-
-)
+# # Run the app
+# target_audit_app = UploadRegionFiles()
 # target_audit_app.panel().servable()
 
-target_audit_app.view().show()
-
-# +
-
-print(target_audit_app.region_image_upload)
-# print(target_audit_app.get_region_image())
-
-# target_audit_app.param
+# target_audit_app.view().show()
 
 # +
 import param
@@ -214,20 +205,143 @@ class StageUpload(param.Parameterized):
 
     @param.output()
     def output(self):
-        return
+        region_orthophoto = self.upload_widgets.get_region_image()
+        region_geojson = self.upload_widgets.get_region_geojson()
+        return region_orthophoto, region_geojson
     
     def _add_upload_widgets(self):
         self.upload_widgets = UploadRegionFiles()
 
     def panel(self):
-        return self.upload_widgets.panel().servable()
+        return self.upload_widgets.view().servable()
+
+
 # -
-
-
-
 # ## Perform CV Search
 # - Set parameters for CV seach
 # - Perform on uploaded image
+
+# +
+from skimage.exposure import equalize_adapthist
+from skimage.filters import threshold_otsu
+from skimage.morphology import opening, closing, disk
+import cv2
+import numpy as np
+
+from plant_search.vegetation_indices import normalize_rgb, calculate_exg
+
+import param
+import panel as pn
+
+class ProcessingTechnique(param.Parameterized):
+    def apply(self, image):
+        raise NotImplementedError("Each technique must implement the `apply` method.")
+
+
+class VegetationIndex(param.Parameterized):
+    vegetation_index_enabled = param.Boolean(default=True, doc="Choose to enable vegetation index")
+    selected_vegetation_index = param.Selector(objects=["exg"])
+
+    def __init__(self, **params):
+        super().__init__(**params)
+
+    def apply(self, image):
+        if self.vegetation_index_enabled:
+            exg = calculate_exg(*normalize_rgb(image))
+            exg_normalized = (exg - np.min(exg)) / (np.max(exg) - np.min(exg))  # Normalize to [0, 1]
+            exg_uint8 = (exg_normalized * 255).astype(np.uint8)
+            return exg_uint8
+        else:
+                return image # Pass along without updating
+
+    def view(self):
+        panel_column = pn.Column(
+            "Vegetation Index",
+            self.param
+        )
+        return panel_column
+
+
+class Smoothing(ProcessingTechnique):
+    smoothing_enabled = param.Boolean(default=True, doc="Choose to enable bilinear filtering")
+    smoothing_diameter = param.Integer(default=9, bounds=(3, 20), doc="Diameter of each pixel neighborhood used during filtering.")
+    smoothing_sigma_color = param.Number(default=50, bounds=(20,70), doc="Controls how much influence the color difference between pixels has on the filtering")
+    smoothing_sigma_spatial = param.Number(default=15, doc="Controls the influence of the spatial distance between pixels.")
+
+    def apply(self, image):
+        if self.smoothing_enabled:
+            bilateral_smoothed_img = cv2.bilateralFilter(
+                image , d=self.smoothing_diameter, 
+                sigmaColor=self.smoothing_sigma_color, 
+                sigmaSpace=self.smoothing_sigma_spatial
+            )
+            bilateral_smoothed_img = bilateral_smoothed_img / 255.0  # Scale back to [0, 1]
+            return bilateral_smoothed_img
+        else:
+            return image # Pass along without updating
+
+    def view(self):
+        panel_column = pn.Column(
+            "Image Smoothing",
+            self.param
+        )
+        return panel_column
+
+
+class MorphologicalRefinement(ProcessingTechnique):
+    morphological_enabled = param.Boolean(default=True, doc="Choose to enable morphological refinement")
+    morphological_disk_size = param.Integer(default=7, doc="Radius of structuring element for contour adjustment")
+
+    def apply(self, image):
+        if self.morphological_enabled:
+            selem = disk(7)  # Structuring element
+            morph_img = closing(opening(image, selem), selem)
+            return morph_img
+        else:
+            return image # Pass along without updating
+        
+    def view(self):
+        panel_column = pn.Column(
+            "Morphological Refinement",
+            self.param
+        )
+        return panel_column
+
+
+class TargetSearch(param.Parameterized):
+
+    input_image = param.Parameter(default=None, doc="Input orthophoto to search")
+    techniques = param.List(default=[])
+
+    # contrast_enhance_enabled = param.Boolean(default=False, doc="Choose to enable contrast enhancement")
+    # contrast_clip_limit = param.Number(default=0.02, doc="Defines the maximum allowed height of the histogram bins in each tile")
+
+
+    def __init__(self, **params):
+        super().__init__(**params)
+        # self._add_upload_widgets()
+    
+    # @param.output()
+    def search_targets(self):
+        image = self.input_image
+        for technique in self.techniques:
+            image = technique.apply(image)
+        return image
+
+    def view(self):
+        # panels = [technique.view() for technique in self.techniques]
+        tabs = pn.Tabs(
+            *[  (technique.__class__.__name__, technique.view())
+                for technique in self.techniques
+            ])
+        target_panel = pn.Column(
+            pn.Row("**Find targets from image**"),
+            tabs,
+            self.param
+        )
+        return target_panel
+    
+    
 
 # +
 import param
@@ -236,17 +350,36 @@ class StageSearch(param.Parameterized):
     
     def __init__(self, **params):
         super().__init__(**params)
-        self._add_upload_widgets()
+        self._add_search_widgets()
 
     @param.output()
     def output(self):
         return
     
-    def _add_upload_widgets(self):
-        self.upload_widgets = TargetAuditApp()
+    def _add_search_widgets(self):
+        self.search_widgets = TargetSearch()
 
     def panel(self):
-        return self.upload_widgets.panel().servable()
+        return self.search_widgets.view().servable()
+    
+
+# Manually run this stage
+from plant_search.load_image import load_image, plot_image
+
+image, transform, bounds, crs = load_image(region_image_path)
+# if image is not None:
+#     plot_image(image, "Original Image")
+
+
+veg_index = VegetationIndex()
+smoothing = Smoothing()
+morphological = MorphologicalRefinement()
+
+search = TargetSearch(
+    input_image=image, 
+    techniques=[veg_index, smoothing, morphological]
+)
+search.view().show()
 
 
 # -
@@ -547,7 +680,7 @@ pipeline.add_stage('Upload', StageUpload)
 pipeline.add_stage('Search', StageSearch)
 pipeline.add_stage('Audit', StageAudit)
 
-# pipeline.show()
+pipeline.show()
 
 # + vscode={"languageId": "raw"} active=""
 # import param
