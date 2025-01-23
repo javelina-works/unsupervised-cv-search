@@ -73,18 +73,20 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 import param
 import panel as pn
 import geopandas as gpd
-import matplotlib.pyplot as plt
 from io import BytesIO
 import json
 from PIL import Image
 
+
 pn.extension('filedropper')
 
-
-class TargetAuditApp(param.Parameterized):
+class UploadRegionFiles(param.Parameterized):
     # Parameters for tracking uploaded files
     region_image_upload = param.Parameter(default=None)
     region_geojson_upload = param.Parameter(default=None)
+    
+    region_image_upload_name = param.Parameter(default=None)
+    region_geojson_upload_name = param.Parameter(default=None)
 
     # FileDropper widgets
 
@@ -97,6 +99,10 @@ class TargetAuditApp(param.Parameterized):
     def __init__(self, **params):
         super().__init__(**params)
 
+        self.region_image = None
+
+        self.image_upload_raw = None
+
         # Link FileDropper outputs to parameters
         self.image_dropper.param.watch(self._update_region_image, "value")
         self.geojson_dropper.param.watch(self._update_region_geojson, "value")
@@ -104,7 +110,10 @@ class TargetAuditApp(param.Parameterized):
     # Update methods for parameters
     def _update_region_image(self, event):
         if event.new:
+            print(f"New event")
             self.region_image_upload = event.new
+        else:
+            print(event)
 
     def _update_region_geojson(self, event):
         if event.new:
@@ -114,11 +123,16 @@ class TargetAuditApp(param.Parameterized):
             self.region_geojson_upload = event.new
 
     def get_region_image(self):
-        image_upload_dict = self.region_image_upload # Stays as dict of files
-        first_file_name = list(image_upload_dict.keys())[0] # Dict of file names:bytes
-        image_stream  = BytesIO(image_upload_dict[first_file_name]) # Bytes to Stream
-        region_image = Image.open(image_stream)  # Stream to PIL image
-        return region_image
+        if self.region_image_upload:
+            image_upload_dict = self.region_image_upload # Stays as dict of files
+            first_file_name = list(image_upload_dict.keys())[0] # Dict of file names:bytes
+            image_stream  = BytesIO(image_upload_dict[first_file_name]) # Bytes to Stream
+            region_image = Image.open(image_stream)  # Stream to PIL image
+            self.region_image_name = first_file_name
+            return region_image
+        else:
+            self.region_image_name = None
+            return None
 
     def get_region_geojson(self):
         geojson_upload_dict = self.region_geojson_upload # Dict of files
@@ -127,15 +141,13 @@ class TargetAuditApp(param.Parameterized):
         region_geojson = json.loads(file_bytes_string)  # String to JSON dict
         return region_geojson
 
-    # A method to display the uploaded region image
     def view_image(self):
+        print("view image hook triggered!")
         if self.region_image_upload:
             try:
-                image_data = self.get_region_image()
-                fig, ax = plt.subplots(figsize=(4, 4))
-                ax.imshow(image_data)
-                ax.axis('off')
-                return pn.pane.Matplotlib(fig)
+                # image_data = self.get_region_image()
+                image_data = self.region_image
+                return pn.pane.Image(image_data, height=500, width=500)
             except Exception as e:
                 return f"Error displaying image: {e}"
         else:
@@ -153,24 +165,34 @@ class TargetAuditApp(param.Parameterized):
             return "No GeoJSON uploaded."
 
     # Panel layout combining file droppers and visualizations
-    def panel(self):
+    def view(self):
         return pn.Column(
             pn.Row(
                 pn.Column("**Drop Region Image Here**", self.image_dropper),
                 pn.Column("**Drop GeoJSON Here**", self.geojson_dropper),
             ),
             pn.Row(
-                pn.Column("**Uploaded Region Image**", self.view_image),
+                pn.Column("**Uploaded Region Image**", self.self.view_image),
                 pn.Column("**Uploaded GeoJSON Outline**", self.view_geojson),
             ),
         )
 
 
 # Run the app
-# target_audit_app = TargetAuditApp()
+target_audit_app = UploadRegionFiles(
+
+)
 # target_audit_app.panel().servable()
 
-# target_audit_app.panel().show()
+target_audit_app.view().show()
+```
+
+```python
+
+# print(target_audit_app.region_image_upload)
+# print(target_audit_app.get_region_image())
+
+target_audit_app.param
 ```
 
 ```python
@@ -187,15 +209,15 @@ class StageUpload(param.Parameterized):
         return
     
     def _add_upload_widgets(self):
-        self.upload_widgets = TargetAuditApp()
+        self.upload_widgets = UploadRegionFiles()
 
     def panel(self):
         return self.upload_widgets.panel().servable()
 ```
-
 ```python
 
 ```
+
 
 ## Perform CV Search
 - Set parameters for CV seach
@@ -494,6 +516,7 @@ audit_stage = StageAudit(
     region_geojson_path=region_contour_geojson
 )
 
+audit_stage.panel().show()
 
 # map_panel = pn.pane.IPyWidget(map_view.map)
 # map_panel = pn.panel(map_view.map).servable();
@@ -513,9 +536,10 @@ Add our initialized stages to the pipeline.
 ```python
 
 pipeline.add_stage('Upload', StageUpload)
+pipeline.add_stage('Search', StageSearch)
 pipeline.add_stage('Audit', StageAudit)
 
-pipeline.show()
+# pipeline.show()
 ```
 
 <!-- #raw vscode={"languageId": "raw"} -->
