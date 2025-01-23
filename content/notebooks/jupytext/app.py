@@ -74,8 +74,9 @@ import geopandas as gpd
 from io import BytesIO
 import json
 from PIL import Image
+import geoviews as gv
 
-
+gv.extension('bokeh')
 pn.extension('filedropper')
 
 class UploadRegionFiles(param.Parameterized):
@@ -151,7 +152,23 @@ class UploadRegionFiles(param.Parameterized):
         if self.region_geojson_upload:
             try:
                 region_geojson = self.get_region_geojson()
-                return pn.pane.JSON(region_geojson, depth=2, name="Uploaded GeoJSON")
+                json_pane = pn.pane.JSON(region_geojson, depth=2, name="Uploaded GeoJSON")
+
+                gdf = gpd.GeoDataFrame.from_features(region_geojson["features"])
+                gv_geojson = gv.Polygons(gdf, vdims=["name"] if "name" in gdf.columns else None).opts(
+                    fill_alpha=0.5,
+                    line_width=2,
+                    color="blue",
+                    tools=["hover"],
+                    active_tools=["wheel_zoom"],
+                    width=600,
+                    height=400,
+                    title="Region Outline Visualization"
+                )
+
+                geojson_row = pn.Row(json_pane, gv_geojson)
+
+                return geojson_row
             except Exception as e:
                 return f"Error processing GeoJSON: {e}"
         else:
