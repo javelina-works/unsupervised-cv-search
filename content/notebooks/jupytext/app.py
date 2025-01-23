@@ -97,8 +97,6 @@ class UploadRegionFiles(param.Parameterized):
     def __init__(self, **params):
         super().__init__(**params)
 
-        self.region_image = None
-
         self.image_upload_raw = None
 
         # Link FileDropper outputs to parameters
@@ -110,8 +108,11 @@ class UploadRegionFiles(param.Parameterized):
         if event.new:
             print(f"New event")
             self.region_image_upload = event.new
+            self.get_region_image()
         else:
             print(event)
+            self.region_image_upload = event.new
+            self.get_region_image()
 
     def _update_region_geojson(self, event):
         if event.new:
@@ -126,10 +127,10 @@ class UploadRegionFiles(param.Parameterized):
             first_file_name = list(image_upload_dict.keys())[0] # Dict of file names:bytes
             image_stream  = BytesIO(image_upload_dict[first_file_name]) # Bytes to Stream
             region_image = Image.open(image_stream)  # Stream to PIL image
-            self.region_image_name = first_file_name
+            self.region_image_upload_name = first_file_name
             return region_image
         else:
-            self.region_image_name = None
+            self.region_image_upload_name = None
             return None
 
     def get_region_geojson(self):
@@ -140,11 +141,9 @@ class UploadRegionFiles(param.Parameterized):
         return region_geojson
 
     def view_image(self):
-        print("view image hook triggered!")
         if self.region_image_upload:
             try:
-                # image_data = self.get_region_image()
-                image_data = self.region_image
+                image_data = self.get_region_image()
                 return pn.pane.Image(image_data, height=500, width=500)
             except Exception as e:
                 return f"Error displaying image: {e}"
@@ -170,7 +169,7 @@ class UploadRegionFiles(param.Parameterized):
                 pn.Column("**Drop GeoJSON Here**", self.geojson_dropper),
             ),
             pn.Row(
-                pn.Column("**Uploaded Region Image**", self.self.view_image),
+                pn.Column("**Uploaded Region Image**", self.view_image),
                 pn.Column("**Uploaded GeoJSON Outline**", self.view_geojson),
             ),
         )
@@ -186,10 +185,10 @@ target_audit_app.view().show()
 
 # +
 
-# print(target_audit_app.region_image_upload)
+print(target_audit_app.region_image_upload)
 # print(target_audit_app.get_region_image())
 
-target_audit_app.param
+# target_audit_app.param
 
 # +
 import param
