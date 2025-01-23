@@ -234,11 +234,41 @@ import param
 import panel as pn
 
 class ProcessingTechnique(param.Parameterized):
+    enabled = param.Boolean(default=True, doc="Choose to enable processing technique")
+    
+    input_image = param.Parameter(default=None, doc="Input image to process")
+    output_image = param.Parameter(default=None, doc="Processed image after applying the technique")
+
     def apply(self, image):
         raise NotImplementedError("Each technique must implement the `apply` method.")
 
+    def _update_image(self):
+        if self.input_image is not None:
+            self.apply(self.input_image)
 
-class VegetationIndex(param.Parameterized):
+    def view_image(self):
+        if self.input_image is not None:
+            try:
+                self.apply(self.input_image)
+                images_row = pn.Row(
+                    pn.pane.Image(self.input_image, height=500, width=500),
+                    pn.pane.Image(self.output_image, height=500, width=500)
+                )
+                return images_row 
+            except Exception as e:
+                return f"{self.name}: Error displaying image: {e}"
+        else:
+            return "No image uploaded."
+
+    def view(self):
+        panel_column = pn.Column(
+            self.param,
+            self.view_image
+        )
+        return panel_column
+
+
+class VegetationIndex(ProcessingTechnique):
     vegetation_index_enabled = param.Boolean(default=True, doc="Choose to enable vegetation index")
     selected_vegetation_index = param.Selector(objects=["exg"])
 
@@ -254,19 +284,19 @@ class VegetationIndex(param.Parameterized):
         else:
                 return image # Pass along without updating
 
-    def view(self):
-        panel_column = pn.Column(
-            "Vegetation Index",
-            self.param
-        )
-        return panel_column
+    # def view(self):
+    #     panel_column = pn.Column(
+    #         "Vegetation Index",
+    #         self.param
+    #     )
+    #     return panel_column
 
 
 class Smoothing(ProcessingTechnique):
     smoothing_enabled = param.Boolean(default=True, doc="Choose to enable bilinear filtering")
     smoothing_diameter = param.Integer(default=9, bounds=(3, 20), doc="Diameter of each pixel neighborhood used during filtering.")
     smoothing_sigma_color = param.Number(default=50, bounds=(20,70), doc="Controls how much influence the color difference between pixels has on the filtering")
-    smoothing_sigma_spatial = param.Number(default=15, doc="Controls the influence of the spatial distance between pixels.")
+    smoothing_sigma_spatial = param.Number(default=15, bounds=(0,45), doc="Controls the influence of the spatial distance between pixels.")
 
     def apply(self, image):
         if self.smoothing_enabled:
@@ -280,13 +310,30 @@ class Smoothing(ProcessingTechnique):
         else:
             return image # Pass along without updating
 
-    def view(self):
-        panel_column = pn.Column(
-            "Image Smoothing",
-            self.param
-        )
-        return panel_column
+    # def view(self):
+    #     panel_column = pn.Column(
+    #         "Image Smoothing",
+    #         self.param
+    #     )
+    #     return panel_column
 
+
+class ContrastEnhancement(ProcessingTechnique):
+    contrast_enhance_enabled = param.Boolean(default=False, doc="Choose to enable contrast enhancement")
+    contrast_clip_limit = param.Number(default=0.02, doc="Defines the maximum allowed height of the histogram bins in each tile")
+
+    def apply(self, image):
+        if self.contrast_enhance_enabled:
+            return equalize_adapthist(image, clip_limit=self.contrast_clip_limit)
+        else:
+            return image # Pass along without updating
+        
+    # def view(self):
+    #     panel_column = pn.Column(
+    #         "Morphological Refinement",
+    #         self.param
+    #     )
+    #     return panel_column
 
 class MorphologicalRefinement(ProcessingTechnique):
     morphological_enabled = param.Boolean(default=True, doc="Choose to enable morphological refinement")
@@ -300,12 +347,12 @@ class MorphologicalRefinement(ProcessingTechnique):
         else:
             return image # Pass along without updating
         
-    def view(self):
-        panel_column = pn.Column(
-            "Morphological Refinement",
-            self.param
-        )
-        return panel_column
+    # def view(self):
+    #     panel_column = pn.Column(
+    #         "Morphological Refinement",
+    #         self.param
+    #     )
+    #     return panel_column
 
 
 class TargetSearch(param.Parameterized):
@@ -319,7 +366,9 @@ class TargetSearch(param.Parameterized):
 
     def __init__(self, **params):
         super().__init__(**params)
-        # self._add_upload_widgets()
+        for technique in self.techniques:
+            technique.input_image = self.input_image
+
     
     # @param.output()
     def search_targets(self):
@@ -334,9 +383,16 @@ class TargetSearch(param.Parameterized):
             *[  (technique.__class__.__name__, technique.view())
                 for technique in self.techniques
             ])
+        
+        if self.input_image:
+            image_pane = pn.pane.Image(self.input_image, height=300)
+        else:
+            image_pane = "No image uploaded"
+
         target_panel = pn.Column(
             pn.Row("**Find targets from image**"),
             tabs,
+            image_pane,
             self.param
         )
         return target_panel
@@ -366,23 +422,48 @@ class StageSearch(param.Parameterized):
 # Manually run this stage
 from plant_search.load_image import load_image, plot_image
 
-image, transform, bounds, crs = load_image(region_image_path)
+# image, transform, bounds, crs = load_image(region_image_path)
 # if image is not None:
 #     plot_image(image, "Original Image")
 
+ds = 8 # downscale ratio
+import rasterio
+
+with rasterio.open(region_image_path) as src:
+    # Read the first three bands (assuming they correspond to RGB)
+    image_data = src.read([1, 2, 3])  # Read bands 1, 2, and 3
+
+    # Normalize the values to 0-255 for display (if needed)
+    image_data = image_data.astype(np.float32)
+    for band in range(image_data.shape[0]):
+        image_data[band] = 255 * (image_data[band] - image_data[band].min()) / (image_data[band].max() - image_data[band].min())
+
+    # Transpose and convert to uint8
+    image_data = image_data.transpose(1, 2, 0).astype(np.uint8)
+    image_data = image_data[::ds, ::ds]
+
+# Convert to a Pillow image and display
+image = Image.fromarray(image_data)
 
 veg_index = VegetationIndex()
 smoothing = Smoothing()
+contrast = ContrastEnhancement()
 morphological = MorphologicalRefinement()
 
 search = TargetSearch(
-    input_image=image, 
-    techniques=[veg_index, smoothing, morphological]
+    input_image=image_data, 
+    techniques=[veg_index, smoothing, contrast, morphological]
 )
 search.view().show()
 
 
 # -
+
+image = Image.open(region_image_path)
+# image.show()
+
+image = Image.fromarray(image_data)
+pn.pane.Image(image, height=300).show()
 
 # ## Audit Targets
 # - Manually deselect targets missed by the algorithm
