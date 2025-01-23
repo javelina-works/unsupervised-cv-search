@@ -99,29 +99,19 @@ class UploadRegionFiles(param.Parameterized):
     def __init__(self, **params):
         super().__init__(**params)
 
-        self.image_upload_raw = None
-
         # Link FileDropper outputs to parameters
         self.image_dropper.param.watch(self._update_region_image, "value")
         self.geojson_dropper.param.watch(self._update_region_geojson, "value")
 
     # Update methods for parameters
     def _update_region_image(self, event):
-        if event.new:
-            print(f"New event")
+            # Upate for all events, including removal of file
             self.region_image_upload = event.new
-            self.get_region_image()
-        else:
-            print(event)
-            self.region_image_upload = event.new
-            self.get_region_image()
+            self.get_region_image() # Update name & contents when possible
 
     def _update_region_geojson(self, event):
-        if event.new:
-            # first_file_name = list(event.new.keys())[0] # Dict of file names:bytes
-            # file_bytes_string = event.new[first_file_name].decode("utf-8") # Bytes to string
-            # self.region_geojson = json.loads(file_bytes_string)  # String to JSON dict
-            self.region_geojson_upload = event.new
+        self.region_geojson_upload = event.new
+        self.get_region_geojson() # Update name & contents when event triggered
 
     def get_region_image(self):
         if self.region_image_upload:
@@ -136,11 +126,17 @@ class UploadRegionFiles(param.Parameterized):
             return None
 
     def get_region_geojson(self):
-        geojson_upload_dict = self.region_geojson_upload # Dict of files
-        first_file_name = list(geojson_upload_dict.keys())[0] # Dict of file names:bytes
-        file_bytes_string = geojson_upload_dict[first_file_name].decode("utf-8") # Bytes to string
-        region_geojson = json.loads(file_bytes_string)  # String to JSON dict
-        return region_geojson
+        if self.region_geojson_upload:
+            geojson_upload_dict = self.region_geojson_upload # Dict of files
+            first_file_name = list(geojson_upload_dict.keys())[0] # Dict of file names:bytes
+            file_bytes_string = geojson_upload_dict[first_file_name].decode("utf-8") # Bytes to string
+            region_geojson = json.loads(file_bytes_string)  # String to JSON dict
+            
+            self.region_geojson_upload_name = first_file_name
+            return region_geojson
+        else:
+            self.region_geojson_upload_name = None # Remember to reset when deleted
+            return None
 
     def view_image(self):
         if self.region_image_upload:
