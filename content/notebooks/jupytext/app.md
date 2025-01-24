@@ -226,12 +226,24 @@ class StageUpload(param.Parameterized):
         return pn.Row(self.upload_widgets.view())
 ```
 ```python
+# # Run first stage manually
 
-stage1 = StageUpload()
-stage1.panel()
-# stage1.param.outputs()
+# stage1 = StageUpload()
+# stage1.panel() # In notebook
+# stage1.panel().show() # In browser
+# # stage1.param.outputs()
+```
 
+```python
+# import numpy as np
 
+# img, gjson = stage1.output()
+# print(type(gjson))
+# print(type(img))
+
+# image_array = np.array(img)
+# print(type(image_array))  # Should print: <class 'numpy.ndarray'>
+# print(image_array.shape)  # Shape of the array
 ```
 
 ## Perform CV Search
@@ -622,6 +634,7 @@ class TargetSearch(param.Parameterized):
 
 ```python
 import param
+import numpy as np
 
 class StageSearch(param.Parameterized):
     input_image = param.Parameter(default=None, doc="Image to search for targets")
@@ -641,8 +654,9 @@ class StageSearch(param.Parameterized):
         morphological = MorphologicalRefinement(enabled=False)
         thresholding = ManualThresholding()
         
+        image_array = np.array(self.input_image) # Needs to be numpy array
         self.search_widgets = TargetSearch(
-            input_image=self.input_image,
+            input_image=image_array,
             techniques=[veg_index, smoothing, contrast, morphological, thresholding]
         )
 
