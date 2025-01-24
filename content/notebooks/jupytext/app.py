@@ -437,28 +437,37 @@ import panel as pn
 
 
 class TargetSearch(param.Parameterized):
-
     input_image = param.Parameter(default=None, doc="Input orthophoto to search")
     techniques = param.List(default=[])
+    sample_downscaling = param.Integer(default=4, bounds=(1,10), doc="Downscale ratio of image shown in intermediate steps")
     output_image = param.Parameter(default=None, doc="Final output image after running the pipeline")
 
     def __init__(self, **params):
         super().__init__(**params)
 
+        self.sample_image = None
         self.output_image = None
+        self._downsample_image()
         self._setup_reactivity()
         # self._chain_techniques()
+        self.progress_bar = pn.widgets.Progress(name="Pipeline Progress", value=0, max=100)
         self._pipeline_button_widget = pn.widgets.Button(name="Run full pipeline", button_type="primary")
         self._pipeline_button_widget.on_click(self._handle_pipeline_button)
 
-    def _chain_techniques(self):
-        prev_output = self.input_image
+    @param.depends("input_image", "sample_downscaling", watch=True)
+    def _downsample_image(self):
+        ds = self.sample_downscaling # Ratio of pixels to ignore
+        self.sample_image = self.input_image[::ds, ::ds]
+
+
+    # def _chain_techniques(self):
+    #     prev_output = self.input_image
         
-        for technique in self.techniques:
-            technique.input_image = prev_output
-            output = technique.apply(prev_output)
-            technique.output_image = output  # Store the output in the technique
-            prev_output = output
+    #     for technique in self.techniques:
+    #         technique.input_image = prev_output
+    #         output = technique.apply(prev_output)
+    #         technique.output_image = output  # Store the output in the technique
+    #         prev_output = output
 
     def _setup_reactivity(self):
         """
@@ -470,13 +479,13 @@ class TargetSearch(param.Parameterized):
         for i, technique in enumerate(self.techniques):
             if i == 0:
                 # First technique takes the main input_image as input
-                technique.param.update(input_image=self.input_image)
-                print(f"Linking {technique.__class__.__name__} input_image to TargetSearch input_image.")
+                technique.param.update(input_image=self.sample_image)
+                # print(f"Linking {technique.__class__.__name__} input_image to TargetSearch input_image.")
                 self.param.watch(lambda event, tech=technique: tech.param.update(input_image=event.new), "input_image")
             else:
                 # Subsequent techniques depend on the output of the previous one
                 prev_technique = self.techniques[i - 1]
-                print(f"Linking {technique.__class__.__name__} input_image to {prev_technique.__class__.__name__} output_image.")
+                # print(f"Linking {technique.__class__.__name__} input_image to {prev_technique.__class__.__name__} output_image.")
                 prev_technique.param.watch(
                     lambda event, tech=technique: tech.param.update(input_image=event.new),
                     "output_image"
@@ -491,15 +500,46 @@ class TargetSearch(param.Parameterized):
     def update_output(self):
         return
 
+    def search_image(self, image):
+        """
+        Performs the full search pipeline as configured on an arbitrary image.
+        """
+        prev_output = image
+        output = prev_output # output starts with no changes
+        for technique in self.techniques:
+            output = technique.apply(prev_output)
+            prev_output = output
+        return output
+
     # @param.output()
     def search_targets(self):
-        """Manually trigger updates for all techniques."""
-        for technique in self.techniques:
-            technique.update_output()
-        # Return the final output
-        return self.techniques[-1].output_image if self.techniques else None
+        """
+        Run the full pipeline and update the progress bar.
+        
+        """
+        num_techniques = len(self.techniques)
+        if num_techniques == 0:
+            print("No techniques to run in the pipeline.")
+            return None
+        
+        self.progress_bar.value = 0
+        self.progress_bar.max = num_techniques
 
-    @param.depends("output_image", watch=True)
+        prev_output = self.input_image
+        output = prev_output # output starts with no changes
+        for i, technique in enumerate(self.techniques):
+            output = technique.apply(prev_output)
+            prev_output = output
+            self.progress_bar.value = i + 1
+            
+        self.progress_bar.value = self.progress_bar.max
+        return output
+    
+        # for technique in self.techniques:
+        #     technique.update_output()
+        # return self.techniques[-1].output_image if self.techniques else None
+
+    @param.depends("output_image", watch=False)
     def view_images(self):
         if self.input_image is not None:
             try:
@@ -532,8 +572,8 @@ class TargetSearch(param.Parameterized):
         target_panel = pn.Column(
             pn.Row("**Find targets from image**"),
             tabs,
-            "Put a divider here for visibility",
-            self._pipeline_button_widget,
+            pn.layout.Divider(),
+            pn.Row(self._pipeline_button_widget, self.progress_bar,),
             self.view_images,
         )
         return target_panel
@@ -561,13 +601,14 @@ class StageSearch(param.Parameterized):
     
 
 # Manually run this stage
-from plant_search.load_image import load_image, plot_image
+from plant_search.load_image import load_image
 
-ds = 8 # downscale ratio
+ds = 1 # downscale ratio
 image, transform, bounds, crs = load_image(region_image_path)
-if image is not None:
-    # plot_image(image, "Original Image")
+if image is not None and ds > 1:
     image_data = image[::ds, ::ds]
+else:
+    image_data = image
 
 veg_index = VegetationIndex()
 smoothing = Smoothing()
@@ -582,22 +623,10 @@ search = TargetSearch(
 search.view().show()
 
 
-
-# +
-# dependencies = veg_index.param.method_dependencies('output_image')
-# [f"{o.inst.name}.{o.pobj.name}:{o.what}" for o in dependencies]
-
-veg_index.param
-# for name, param in veg_index.param.params():
-# for name, param in veg_index.param.values().items():
-# for name, param in veg_index.param.values():
-for name, param in veg_index.param.objects('existing').items():
-    print(name)
-    # print(veg_index.param[name].constant)
-    print(param.constant)
-    print(param.readonly)
-        # if not param.constant and not param.readonly
 # -
+
+print(veg_index.input_image.shape)
+print(search.input_image.shape)
 
 ds = 8 # downscale ratio
 image, transform, bounds, crs = load_image(region_image_path)
