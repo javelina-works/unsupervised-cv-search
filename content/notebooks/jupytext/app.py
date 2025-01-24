@@ -241,21 +241,50 @@ class ProcessingTechnique(param.Parameterized):
 
     def __init__(self, **params):
         super().__init__(**params)
-
         # Assume output=input until technique is applied
         if self.output_image is None:
             self.output_image = self.input_image
 
-        # Manually apply technique to prevent large overhead
-        # Originally auto-computed, but cascading updates too expensive
         self._apply_button_widget = pn.widgets.Button(name="Apply", button_type="primary")
         self._apply_button_widget.on_click(self._handle_update_button)
+        self._reset_button_widget = pn.widgets.Button(name="Reset Parameters", button_type="warning")
+        self._reset_button_widget.on_click(self._reset_params)
+        self.image_outdated = False
+        self._watch_for_outdated()
 
     def perform_technique(self, image):
         raise NotImplementedError("Each technique must implement the `apply` method.")
 
+    def _watch_for_outdated(self):
+        """Set up watchers to mark the image as outdated when any parameter changes."""
+        for name, parameter in self.param.objects("existing").items():
+            if name not in {"output_image", "image_outdated"} and not parameter.constant and not parameter.readonly:
+                self.param.watch(self._mark_outdated, name)
+
+    def _mark_outdated(self, event=None):
+        """Mark the image as outdated."""
+        self.image_outdated = True
+        print(f"{self.__class__.__name__}: Image marked as outdated due to parameter change.")
+
     def _handle_update_button(self, event):
+            # Manually apply technique to prevent large overhead
+            # Originally auto-computed, but cascading updates too expensive
+            self.image_outdated = False
             self.update_output() # Calculate technique, update output
+
+    def _reset_params(self, event=None):
+        """Reset all parameters to their default values."""
+        defaults = {
+            name: param.default 
+            for name, param in self.param.objects('existing').items()
+            if (
+                not param.constant and 
+                not param.readonly and
+                name != 'input_image' # Don't remove input image
+            )
+        }
+        self.param.update(**defaults)
+        self.image_outdated = True # Need to apply to get new computation
 
     def _prepare_np_image(self, image):
         updated = image
@@ -302,6 +331,17 @@ class ProcessingTechnique(param.Parameterized):
         if self.input_image is not None:
             self.output_image = self.apply(self.input_image)
 
+    def view_outdated_warning(self):
+        """Return the complete UI for this technique."""
+        warning_message = (
+            pn.pane.Markdown(
+                "**Apply to update**"
+            )
+            if self.image_outdated
+            else ""
+        )
+        return warning_message
+
     def view_image(self):
         if self.input_image is not None:
             try:
@@ -314,7 +354,6 @@ class ProcessingTechnique(param.Parameterized):
                     output_image = Image.fromarray(self.input_image)
 
                 images_row = pn.Row(
-                    self._apply_button_widget,
                     pn.pane.Image(input_image, height=500, width=500),
                     pn.pane.Image(output_image, height=500, width=500)
                 )
@@ -326,7 +365,11 @@ class ProcessingTechnique(param.Parameterized):
 
     def view(self):
         panel_column = pn.Row(
-            self.param,
+            pn.Column(
+                self.param,
+                self._reset_button_widget,
+                pn.Row(self._apply_button_widget, self.view_outdated_warning),
+            ),
             self.view_image
         )
         return panel_column
@@ -360,7 +403,7 @@ class Smoothing(ProcessingTechnique):
     
 
 class ContrastEnhancement(ProcessingTechnique):
-    contrast_clip_limit = param.Number(default=0.02, doc="Defines the maximum allowed height of the histogram bins in each tile")
+    contrast_clip_limit = param.Number(default=0.02, step=0.1, bounds=(0.0, 0.15), doc="Defines the maximum allowed height of the histogram bins in each tile")
 
     def perform_technique(self, image):
         # image = image / 255
@@ -500,15 +543,27 @@ thresholding = ManualThresholding(enabled=False)
 
 search = TargetSearch(
     input_image=image_data, 
-    techniques=[veg_index, smoothing, contrast, morphological]
+    techniques=[veg_index, smoothing, contrast, morphological, thresholding]
 )
 search.view().show()
 
 
-# -
 
-dependencies = veg_index.param.method_dependencies('output_image')
-[f"{o.inst.name}.{o.pobj.name}:{o.what}" for o in dependencies]
+# +
+# dependencies = veg_index.param.method_dependencies('output_image')
+# [f"{o.inst.name}.{o.pobj.name}:{o.what}" for o in dependencies]
+
+veg_index.param
+# for name, param in veg_index.param.params():
+# for name, param in veg_index.param.values().items():
+# for name, param in veg_index.param.values():
+for name, param in veg_index.param.objects('existing').items():
+    print(name)
+    # print(veg_index.param[name].constant)
+    print(param.constant)
+    print(param.readonly)
+        # if not param.constant and not param.readonly
+# -
 
 ds = 8 # downscale ratio
 image, transform, bounds, crs = load_image(region_image_path)
