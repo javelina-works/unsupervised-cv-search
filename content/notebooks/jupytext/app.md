@@ -239,49 +239,81 @@ class ProcessingTechnique(param.Parameterized):
     enabled = param.Boolean(default=True, doc="Choose to enable processing technique")
     input_image = param.Parameter(default=None, doc="Input image to process")
     output_image = param.Parameter(default=None, doc="Processed image after applying the technique")
-    # apply_changes = param.Action(lambda self: self.update_output(), doc="Apply the technique")
 
     def __init__(self, **params):
         super().__init__(**params)
+
+        # Assume output=input until technique is applied
+        if self.output_image is None:
+            self.output_image = self.input_image
+
+        # Manually apply technique to prevent large overhead
+        # Originally auto-computed, but cascading updates too expensive
         self._apply_button_widget = pn.widgets.Button(name="Apply", button_type="primary")
-        self._apply_button_widget.on_click(self.update_output())
+        self._apply_button_widget.on_click(self._handle_update_button)
 
     def perform_technique(self, image):
         raise NotImplementedError("Each technique must implement the `apply` method.")
+
+    def _handle_update_button(self, event):
+            self.update_output() # Calculate technique, update output
 
     def _prepare_np_image(self, image):
         updated = image
         if len(updated.shape) >= 3 and updated.shape[2] > 3:
             updated = updated[:, :, :3] # Max 3 bands
         if updated.dtype != np.uint8:
-            print("Change datatypes")
-            # image_normalized = (image - np.min(image)) / (np.max(image) - np.min(image))  # Normalize to [0, 1]
-            # image = (image_normalized * 255).astype(np.uint8)  # Scale to [0, 255]
             updated = (updated).astype(np.uint8)  # Scale to [0, 255]
         return updated
 
     def apply(self, image):
+        """
+        Performs technique on passed image. However, this does NOT
+        assume argument is 'input_image', and does NOT update the 
+        param's 'output_image'. 
+        """
         if self.enabled:
-            prep_image = self._prepare_np_image(image)
+            prep_image = self._prepare_np_image(image) # Get to standard np_array form
             return self.perform_technique(prep_image)
         else:
             return image # Pass along without updating
 
 
-    @param.depends("input_image", watch=True)
+    @param.depends("input_image", "enabled", watch=True)
+    def _passthrough_output(self):
+        """
+        We assume multiple techniques may be used in sequence.
+
+        If 'input_image' is updated and technique is disabled, simply
+        pass 'input_image' through to output.
+
+        This allows later stages to have their inputs auto-updated if
+        watching for updates to this stage's output_image.
+        """
+        if not self.enabled:
+            self.output_image = self.input_image
+
     def update_output(self):
-        """Automatically update output when input changes"""
-        print(f"{self.__class__.__name__} received new input_image.")
+        """
+        Performs technique on own 'input_image', and updates 'output_image'.
+
+        This is the only method that computes and sets 'output_image' from
+        the object's own 'input_image'.
+        """
         if self.input_image is not None:
             self.output_image = self.apply(self.input_image)
-            print(f"{self.__class__.__name__} updated output_image.")
 
     def view_image(self):
         if self.input_image is not None:
             try:
-                output = self.apply(self.input_image)
+                # output = self.apply(self.input_image)
+                # output_image = Image.fromarray(output)
                 input_image = Image.fromarray(self.input_image)
-                output_image = Image.fromarray(output)
+                if self.output_image is not None:
+                    output_image = Image.fromarray(self.output_image)
+                else:
+                    output_image = Image.fromarray(self.input_image)
+
                 images_row = pn.Row(
                     self._apply_button_widget,
                     pn.pane.Image(input_image, height=500, width=500),
@@ -340,7 +372,7 @@ class ContrastEnhancement(ProcessingTechnique):
 
 
 class MorphologicalRefinement(ProcessingTechnique):
-    morphological_disk_size = param.Integer(default=7, doc="Radius of structuring element for contour adjustment")
+    morphological_disk_size = param.Integer(default=7, bounds=(1, 20), doc="Radius of structuring element for contour adjustment")
 
     def perform_technique(self, image):
         selem = disk(7)  # Structuring element
@@ -833,7 +865,7 @@ audit_stage = StageAudit(
     region_geojson_path=region_contour_geojson
 )
 
-audit_stage.panel().show()
+# audit_stage.panel().show()
 
 # map_panel = pn.pane.IPyWidget(map_view.map)
 # map_panel = pn.panel(map_view.map).servable();
@@ -856,7 +888,7 @@ pipeline.add_stage('Upload', StageUpload)
 pipeline.add_stage('Search', StageSearch)
 pipeline.add_stage('Audit', StageAudit)
 
-pipeline.show()
+# pipeline.show()
 ```
 
 <!-- #raw vscode={"languageId": "raw"} -->
