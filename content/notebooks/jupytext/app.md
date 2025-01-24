@@ -265,7 +265,6 @@ class ProcessingTechnique(param.Parameterized):
     def _mark_outdated(self, event=None):
         """Mark the image as outdated."""
         self.image_outdated = True
-        print(f"{self.__class__.__name__}: Image marked as outdated due to parameter change.")
 
     def _handle_update_button(self, event):
             # Manually apply technique to prevent large overhead
@@ -424,10 +423,11 @@ class MorphologicalRefinement(ProcessingTechnique):
     
 
 class ManualThresholding(ProcessingTechnique):
-    threshold = param.Number(default=0.5, bounds=(0.0, 1.0))
+    threshold = param.Number(default=0.5, step=0.01, bounds=(0.0, 1.0))
 
     def perform_technique(self, image):
-        binary_mask = image > self.threshold
+        scale_image = image / 255.0 # Scale to [0,1] range
+        binary_mask = scale_image > self.threshold
         return binary_mask
     
 
@@ -442,12 +442,16 @@ class TargetSearch(param.Parameterized):
 
     input_image = param.Parameter(default=None, doc="Input orthophoto to search")
     techniques = param.List(default=[])
+    output_image = param.Parameter(default=None, doc="Final output image after running the pipeline")
 
     def __init__(self, **params):
         super().__init__(**params)
 
+        self.output_image = None
         self._setup_reactivity()
         # self._chain_techniques()
+        self._pipeline_button_widget = pn.widgets.Button(name="Run full pipeline", button_type="primary")
+        self._pipeline_button_widget.on_click(self._handle_pipeline_button)
 
     def _chain_techniques(self):
         prev_output = self.input_image
@@ -459,9 +463,12 @@ class TargetSearch(param.Parameterized):
             prev_output = output
 
     def _setup_reactivity(self):
-
-
-        """Chain the techniques together reactively."""
+        """
+        Chain the child techniques together reactively.
+        
+        Each technique will react and update it's input in the event its predecessor's
+        'output_image' is updated. 
+        """
         for i, technique in enumerate(self.techniques):
             if i == 0:
                 # First technique takes the main input_image as input
@@ -477,6 +484,15 @@ class TargetSearch(param.Parameterized):
                     "output_image"
                 )
 
+    def _handle_pipeline_button(self, event=None):
+        # TODO: trigger full pipeline run event
+        output = self.search_targets()
+        self.output_image = output
+
+
+    def update_output(self):
+        return
+
     # @param.output()
     def search_targets(self):
         """Manually trigger updates for all techniques."""
@@ -485,24 +501,42 @@ class TargetSearch(param.Parameterized):
         # Return the final output
         return self.techniques[-1].output_image if self.techniques else None
 
+    @param.depends("output_image", watch=True)
+    def view_images(self):
+        if self.input_image is not None:
+            try:
+                input_image = Image.fromarray(self.input_image)
+                input_image_pane = pn.pane.Image(input_image, height=500, width=500)
+            except Exception as e:
+                input_image_pane = f"{self.name}: Error displaying image: {e}"
+        else:
+            input_image_pane = "No image uploaded."
+        
+        if self.output_image is not None:
+            try:
+                output_image = Image.fromarray(self.output_image)
+                output_image_pane = pn.pane.Image(output_image, height=500, width=500)
+            except Exception as e:
+                output_image_pane = f"{self.name}: Error displaying output image: {e}"
+        else:
+            output_image_pane = "Output not yet generated!"
+            
+        return pn.Row(input_image_pane, output_image_pane)
+
+    @param.depends()
     def view(self):
         # panels = [technique.view() for technique in self.techniques]
         tabs = pn.Tabs(
             *[  (technique.__class__.__name__, technique.view())
                 for technique in self.techniques
             ])
-        
-        if self.input_image is not None:
-            input_image = Image.fromarray(self.input_image)
-            image_pane = pn.pane.Image(input_image, height=300)
-        else:
-            image_pane = "No image uploaded"
 
         target_panel = pn.Column(
             pn.Row("**Find targets from image**"),
             tabs,
-            image_pane,
-            self.param
+            "Put a divider here for visibility",
+            self._pipeline_button_widget,
+            self.view_images,
         )
         return target_panel
     
@@ -541,8 +575,8 @@ if image is not None:
 veg_index = VegetationIndex()
 smoothing = Smoothing()
 contrast = ContrastEnhancement(enabled=False)
-morphological = MorphologicalRefinement()
-thresholding = ManualThresholding(enabled=False)
+morphological = MorphologicalRefinement(enabled=False)
+thresholding = ManualThresholding(enabled=True)
 
 search = TargetSearch(
     input_image=image_data, 
