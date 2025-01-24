@@ -233,10 +233,17 @@ from plant_search.vegetation_indices import normalize_rgb, calculate_exg
 import param
 import panel as pn
 
+
 class ProcessingTechnique(param.Parameterized):
     enabled = param.Boolean(default=True, doc="Choose to enable processing technique")
     input_image = param.Parameter(default=None, doc="Input image to process")
     output_image = param.Parameter(default=None, doc="Processed image after applying the technique")
+    # apply_changes = param.Action(lambda self: self.update_output(), doc="Apply the technique")
+
+    def __init__(self, **params):
+        super().__init__(**params)
+        self._apply_button_widget = pn.widgets.Button(name="Apply", button_type="primary")
+        self._apply_button_widget.on_click(self.update_output())
 
     def perform_technique(self, image):
         raise NotImplementedError("Each technique must implement the `apply` method.")
@@ -259,24 +266,23 @@ class ProcessingTechnique(param.Parameterized):
         else:
             return image # Pass along without updating
 
-    def _update_image(self):
+
+    @param.depends("input_image", watch=True)
+    def update_output(self):
+        """Automatically update output when input changes"""
+        print(f"{self.__class__.__name__} received new input_image.")
         if self.input_image is not None:
-            self.apply(self.input_image)
+            self.output_image = self.apply(self.input_image)
+            print(f"{self.__class__.__name__} updated output_image.")
 
     def view_image(self):
         if self.input_image is not None:
             try:
-                norm = Normalize(vmin=0, vmax=255)
-                normalized_image = norm(grayscale_image)
-                # Apply a colormap (e.g., 'viridis')
-                colormap = cm.viridis
-                colored_image = colormap(normalized_image)  # This produces an RGBA image
-                rgb_image = (colored_image * 255).astype(np.uint8)
-
                 output = self.apply(self.input_image)
                 input_image = Image.fromarray(self.input_image)
                 output_image = Image.fromarray(output)
                 images_row = pn.Row(
+                    self._apply_button_widget,
                     pn.pane.Image(input_image, height=500, width=500),
                     pn.pane.Image(output_image, height=500, width=500)
                 )
@@ -287,18 +293,16 @@ class ProcessingTechnique(param.Parameterized):
             return "No image uploaded."
 
     def view(self):
-        panel_column = pn.Column(
+        panel_column = pn.Row(
             self.param,
             self.view_image
         )
         return panel_column
 
 
+
 class VegetationIndex(ProcessingTechnique):
     selected_vegetation_index = param.Selector(objects=["exg"])
-
-    def __init__(self, **params):
-        super().__init__(**params)
 
     def perform_technique(self, image):
         exg = calculate_exg(*normalize_rgb(image))
@@ -341,7 +345,20 @@ class MorphologicalRefinement(ProcessingTechnique):
         selem = disk(7)  # Structuring element
         morph_img = closing(opening(image, selem), selem)
         return morph_img
-        
+    
+
+class ManualThresholding(ProcessingTechnique):
+    threshold = param.Number(default=0.5, bounds=(0.0, 1.0))
+
+    def perform_technique(self, image):
+        binary_mask = image > self.threshold
+        return binary_mask
+    
+
+
+# +
+import param
+import panel as pn      
 
 
 class TargetSearch(param.Parameterized):
@@ -352,33 +369,44 @@ class TargetSearch(param.Parameterized):
     def __init__(self, **params):
         super().__init__(**params)
 
-        self._chain_techniques()
+        self._setup_reactivity()
+        # self._chain_techniques()
 
     def _chain_techniques(self):
         prev_output = self.input_image
-        # prev_technique = None
-
+        
         for technique in self.techniques:
             technique.input_image = prev_output
             output = technique.apply(prev_output)
             technique.output_image = output  # Store the output in the technique
             prev_output = output
 
+    def _setup_reactivity(self):
 
+
+        """Chain the techniques together reactively."""
+        for i, technique in enumerate(self.techniques):
+            if i == 0:
+                # First technique takes the main input_image as input
+                technique.param.update(input_image=self.input_image)
+                print(f"Linking {technique.__class__.__name__} input_image to TargetSearch input_image.")
+                self.param.watch(lambda event, tech=technique: tech.param.update(input_image=event.new), "input_image")
+            else:
+                # Subsequent techniques depend on the output of the previous one
+                prev_technique = self.techniques[i - 1]
+                print(f"Linking {technique.__class__.__name__} input_image to {prev_technique.__class__.__name__} output_image.")
+                prev_technique.param.watch(
+                    lambda event, tech=technique: tech.param.update(input_image=event.new),
+                    "output_image"
+                )
 
     # @param.output()
     def search_targets(self):
-        image = self.input_image
-        prev_output = image
+        """Manually trigger updates for all techniques."""
         for technique in self.techniques:
-            # technique.input_image = prev_output  # Set input for the current technique
-            output = technique.apply(prev_output)  # Apply the technique and get the output
-            prev_output = output
-            # technique.output_image = output  # Store the output in the technique
-
-    
-        # Return the final processed image
-        return image
+            technique.update_output()
+        # Return the final output
+        return self.techniques[-1].output_image if self.techniques else None
 
     def view(self):
         # panels = [technique.view() for technique in self.techniques]
@@ -436,6 +464,7 @@ veg_index = VegetationIndex()
 smoothing = Smoothing()
 contrast = ContrastEnhancement(enabled=False)
 morphological = MorphologicalRefinement()
+thresholding = ManualThresholding(enabled=False)
 
 search = TargetSearch(
     input_image=image_data, 
@@ -445,6 +474,9 @@ search.view().show()
 
 
 # -
+
+dependencies = veg_index.param.method_dependencies('output_image')
+[f"{o.inst.name}.{o.pobj.name}:{o.what}" for o in dependencies]
 
 ds = 8 # downscale ratio
 image, transform, bounds, crs = load_image(region_image_path)
@@ -486,7 +518,7 @@ def bokeh_colormap(grayscale_image):
         x=0, y=0, 
         dw=grayscale_image.shape[1],
         dh=grayscale_image.shape[0],
-        color_mapper=color_mapper,
+        # color_mapper=color_mapper,
     )
 
     # Show the plot
@@ -496,21 +528,24 @@ def bokeh_colormap(grayscale_image):
 
 
 # +
-# image_data = image_data[:, :, :3]
+image_data = image_data[:, :, :3]
 print(image_data.shape)
 print(image_data.dtype)
 
+
+bokeh_colormap(image_data)
+
 # image_data = image_data[:, :, 1]
 
-morphological = VegetationIndex()
-smoothed = morphological.apply(image_data)
-print(smoothed.shape)
-print(smoothed.dtype)
+# morphological = VegetationIndex()
+# smoothed = morphological.apply(image_data)
+# print(smoothed.shape)
+# print(smoothed.dtype)
 
 # smoothed = (smoothed * 255).astype(np.uint8)
 
-bokeh_colormap(smoothed)
-image = Image.fromarray(smoothed)
+# bokeh_colormap(smoothed)
+# image = Image.fromarray(smoothed)
 
 # pn.pane.Image(image, height=300).show()
 # -
