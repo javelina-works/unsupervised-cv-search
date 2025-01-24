@@ -406,7 +406,13 @@ class ContrastEnhancement(ProcessingTechnique):
 
     def perform_technique(self, image):
         # image = image / 255
-        image = image[:, :, 1]
+        
+        if len(image.shape) == 3 and image.shape[2] == 4:  # RGBA
+            image = image[:, :, 1]
+        elif len(image.shape) == 3:  # RGB
+            image = image[:, :, 1]
+        # else:  # Grayscale
+        #     pil_image = Image.fromarray(image)
         equal = equalize_adapthist(image, clip_limit=self.contrast_clip_limit)
         equal_int8 = (equal).astype(np.uint8) # Needs conversion back to uint8
         return equal_int8
@@ -434,7 +440,7 @@ class ManualThresholding(ProcessingTechnique):
 # +
 import param
 import panel as pn      
-
+from PIL import Image
 
 class TargetSearch(param.Parameterized):
     input_image = param.Parameter(default=None, doc="Input orthophoto to search")
@@ -477,13 +483,11 @@ class TargetSearch(param.Parameterized):
         'output_image' is updated. 
         """
         for i, technique in enumerate(self.techniques):
-            if i == 0:
-                # First technique takes the main input_image as input
+            if i == 0: # First technique takes the main input_image as input
                 technique.param.update(input_image=self.sample_image)
                 # print(f"Linking {technique.__class__.__name__} input_image to TargetSearch input_image.")
                 self.param.watch(lambda event, tech=technique: tech.param.update(input_image=event.new), "input_image")
-            else:
-                # Subsequent techniques depend on the output of the previous one
+            else: # Subsequent techniques depend on the output of the previous one
                 prev_technique = self.techniques[i - 1]
                 # print(f"Linking {technique.__class__.__name__} input_image to {prev_technique.__class__.__name__} output_image.")
                 prev_technique.param.watch(
@@ -539,20 +543,32 @@ class TargetSearch(param.Parameterized):
         #     technique.update_output()
         # return self.techniques[-1].output_image if self.techniques else None
 
+    def _downscale_for_display(self, image, max_width=1000, max_height=1000):
+        """Downscale an image for display purposes."""
+        if len(image.shape) == 3 and image.shape[2] == 4:  # RGBA
+            pil_image = Image.fromarray(image[:, :, :3])  # Strip alpha for display
+        elif len(image.shape) == 3:  # RGB
+            pil_image = Image.fromarray(image)
+        else:  # Grayscale
+            pil_image = Image.fromarray(image)
+
+        pil_image.thumbnail((max_width, max_height))  # Resize while maintaining aspect ratio
+        return pil_image
+
     @param.depends("output_image", watch=False)
     def view_images(self):
         if self.input_image is not None:
             try:
-                input_image = Image.fromarray(self.input_image)
+                input_image = self._downscale_for_display(self.input_image)
                 input_image_pane = pn.pane.Image(input_image, height=500, width=500)
             except Exception as e:
-                input_image_pane = f"{self.name}: Error displaying image: {e}"
+                input_image_pane = f"{self.name}: Error displaying input image: {e}"
         else:
             input_image_pane = "No image uploaded."
         
         if self.output_image is not None:
             try:
-                output_image = Image.fromarray(self.output_image)
+                output_image = self._downscale_for_display(self.output_image)
                 output_image_pane = pn.pane.Image(output_image, height=500, width=500)
             except Exception as e:
                 output_image_pane = f"{self.name}: Error displaying output image: {e}"
@@ -627,13 +643,7 @@ search.view().show()
 
 print(veg_index.input_image.shape)
 print(search.input_image.shape)
-
-ds = 8 # downscale ratio
-image, transform, bounds, crs = load_image(region_image_path)
-if image is not None:
-    # plot_image(image, "Original Image")
-    image_data = image[::ds, ::ds]
-
+print(search.output_image.shape)
 
 # +
 from bokeh.plotting import figure, show
