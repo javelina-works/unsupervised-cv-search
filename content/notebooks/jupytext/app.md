@@ -78,14 +78,15 @@ import json
 from PIL import Image
 import geoviews as gv
 
-gv.extension('bokeh')
+# gv.extension('bokeh')
 pn.extension('filedropper')
 
 class UploadRegionFiles(param.Parameterized):
     # Parameters for tracking uploaded files
     region_image_upload = param.Parameter(default=None)
     region_geojson_upload = param.Parameter(default=None)
-    
+    region_image_thumbnail_dims = param.Integer(default=1000, step=250, bounds=(250, 2000), doc="Max dims of uploaded image thumbnail")
+
     region_image_upload_name = param.Parameter(default=None)
     region_geojson_upload_name = param.Parameter(default=None)
 
@@ -94,7 +95,7 @@ class UploadRegionFiles(param.Parameterized):
     # Accepted filetypes bug for this widget: https://github.com/holoviz/panel/issues/7153
     # accepted_filetypes=["allowed/geojson", ".geojson"],
     # Unable to handle our large geoTiff images
-    image_dropper = pn.widgets.FileDropper(height=100, max_file_size ="500MB", chunk_size=30000000)
+    image_dropper = pn.widgets.FileDropper(height=100, max_file_size ="500MB", chunk_size=10_000_000)
     geojson_dropper = pn.widgets.FileDropper(height=100, max_file_size ="100MB")
 
     def __init__(self, **params):
@@ -142,8 +143,10 @@ class UploadRegionFiles(param.Parameterized):
     def view_image(self):
         if self.region_image_upload:
             try:
-                image_data = self.get_region_image()
-                return pn.pane.Image(image_data, height=500, width=500)
+                pil_image = self.get_region_image()
+                thumb_dim = self.region_image_thumbnail_dims
+                pil_image.thumbnail((thumb_dim, thumb_dim))
+                return pn.pane.Image(pil_image, height=500, width=500)
             except Exception as e:
                 return f"Error displaying image: {e}"
         else:
@@ -156,21 +159,25 @@ class UploadRegionFiles(param.Parameterized):
                 region_geojson = self.get_region_geojson()
                 json_pane = pn.pane.JSON(region_geojson, depth=2, name="Uploaded GeoJSON")
 
-                gdf = gpd.GeoDataFrame.from_features(region_geojson["features"])
-                gv_geojson = gv.Polygons(gdf, vdims=["name"] if "name" in gdf.columns else None).opts(
-                    fill_alpha=0.5,
-                    line_width=2,
-                    color="blue",
-                    tools=["hover"],
-                    active_tools=["wheel_zoom"],
-                    width=600,
-                    height=400,
-                    title="Region Outline Visualization"
+                # gdf = gpd.GeoDataFrame.from_features(region_geojson["features"])
+                # # gdf["geometry"] = gdf["geometry"].simplify(tolerance=0.001)  # Reduce geometry complexity
+                # gv_geojson = gv.Polygons(gdf, vdims=["name"] if "name" in gdf.columns else None).opts(
+                #     fill_alpha=0.5,
+                #     line_width=2,
+                #     color="blue",
+                #     tools=["hover"],
+                #     active_tools=["wheel_zoom"],
+                #     width=600,
+                #     height=400,
+                #     title="Region Outline Visualization"
+                # )
+                # view_pane = pn.pane.HoloViews(gv_geojson, height=400, width=600)
+
+                geojson_row = pn.Row(
+                    json_pane, 
+                    # view_pane
                 )
-
-                geojson_row = pn.Row(json_pane, gv_geojson)
-
-                return geojson_row
+                return pn.panel(geojson_row)
             except Exception as e:
                 return f"Error processing GeoJSON: {e}"
         else:
@@ -192,7 +199,7 @@ class UploadRegionFiles(param.Parameterized):
 
 # # Run the app
 # target_audit_app = UploadRegionFiles()
-# target_audit_app.panel().servable()
+# target_audit_app.view().servable()
 
 # target_audit_app.view().show()
 ```
@@ -206,7 +213,7 @@ class StageUpload(param.Parameterized):
         super().__init__(**params)
         self._add_upload_widgets()
 
-    @param.output()
+    @param.output(input_image=param.Parameter, region_geojson=param.Parameter)
     def output(self):
         region_orthophoto = self.upload_widgets.get_region_image()
         region_geojson = self.upload_widgets.get_region_geojson()
@@ -216,8 +223,17 @@ class StageUpload(param.Parameterized):
         self.upload_widgets = UploadRegionFiles()
 
     def panel(self):
-        return self.upload_widgets.view().servable()
+        return pn.Row(self.upload_widgets.view())
 ```
+```python
+
+stage1 = StageUpload()
+stage1.panel()
+# stage1.param.outputs()
+
+
+```
+
 ## Perform CV Search
 - Set parameters for CV seach
 - Perform on uploaded image
@@ -429,6 +445,7 @@ class MorphologicalRefinement(ProcessingTechnique):
     
 
 class ManualThresholding(ProcessingTechnique):
+    enabled = param.Boolean(default=True, readonly=True)
     threshold = param.Number(default=0.5, step=0.01, bounds=(0.0, 1.0))
 
     def perform_technique(self, image):
@@ -464,9 +481,11 @@ class TargetSearch(param.Parameterized):
 
     @param.depends("input_image", "sample_downscaling", watch=True)
     def _downsample_image(self):
-        ds = self.sample_downscaling # Ratio of pixels to ignore
-        self.sample_image = self.input_image[::ds, ::ds]
-
+        if self.input_image is not None:
+            ds = self.sample_downscaling # Ratio of pixels to ignore
+            self.sample_image = self.input_image[::ds, ::ds]
+        else:
+            self.sample_image = None
 
     # def _chain_techniques(self):
     #     prev_output = self.input_image
@@ -523,6 +542,8 @@ class TargetSearch(param.Parameterized):
         Run the full pipeline and update the progress bar.
         
         """
+        if self.input_image is None:
+            return None # no image to process
         num_techniques = len(self.techniques)
         if num_techniques == 0:
             print("No techniques to run in the pipeline.")
@@ -603,7 +624,8 @@ class TargetSearch(param.Parameterized):
 import param
 
 class StageSearch(param.Parameterized):
-    
+    input_image = param.Parameter(default=None, doc="Image to search for targets")
+
     def __init__(self, **params):
         super().__init__(**params)
         self._add_search_widgets()
@@ -613,110 +635,120 @@ class StageSearch(param.Parameterized):
         return
     
     def _add_search_widgets(self):
-        self.search_widgets = TargetSearch()
+        veg_index = VegetationIndex()
+        smoothing = Smoothing()
+        contrast = ContrastEnhancement(enabled=False)
+        morphological = MorphologicalRefinement(enabled=False)
+        thresholding = ManualThresholding()
+        
+        self.search_widgets = TargetSearch(
+            input_image=self.input_image,
+            techniques=[veg_index, smoothing, contrast, morphological, thresholding]
+        )
 
     def panel(self):
-        return self.search_widgets.view().servable()
-    
-
-# Manually run this stage
-from plant_search.load_image import load_image
-
-ds = 1 # downscale ratio
-image, transform, bounds, crs = load_image(region_image_path)
-if image is not None and ds > 1:
-    image_data = image[::ds, ::ds]
-else:
-    image_data = image
-
-veg_index = VegetationIndex()
-smoothing = Smoothing()
-contrast = ContrastEnhancement(enabled=False)
-morphological = MorphologicalRefinement(enabled=False)
-thresholding = ManualThresholding(enabled=True)
-
-search = TargetSearch(
-    input_image=image_data, 
-    techniques=[veg_index, smoothing, contrast, morphological, thresholding]
-)
-search.view().show()
-
+        return pn.Row(self.search_widgets.view())
 
 ```
 
 ```python
-print(veg_index.input_image.shape)
-print(search.input_image.shape)
-print(search.output_image.shape)
+# # Manually run this stage
+# from plant_search.load_image import load_image
+
+# ds = 1 # downscale ratio
+# image, transform, bounds, crs = load_image(region_image_path)
+# if image is not None and ds > 1:
+#     image_data = image[::ds, ::ds]
+# else:
+#     image_data = image
+
+# veg_index = VegetationIndex()
+# smoothing = Smoothing()
+# contrast = ContrastEnhancement(enabled=False)
+# morphological = MorphologicalRefinement(enabled=False)
+# thresholding = ManualThresholding()
+
+# search = TargetSearch(
+#     input_image=image_data, 
+#     techniques=[veg_index, smoothing, contrast, morphological, thresholding]
+# )
+# search.view().show()
 ```
 
 ```python
-from bokeh.plotting import figure, show
-from bokeh.models import LinearColorMapper, ColorBar
-from bokeh.io import output_notebook
-from bokeh.layouts import column
-import numpy as np
+# from bokeh.plotting import figure, show
+# from bokeh.models import LinearColorMapper, ColorBar
+# from bokeh.io import output_notebook
+# from bokeh.layouts import column
+# import numpy as np
 
-def bokeh_colormap(grayscale_image):
+# def bokeh_colormap(grayscale_image):
 
-    grayscale_normalized = grayscale_image / 255.0
-    color_mapper = LinearColorMapper(palette="Greens256", low=1, high=0)
+#     grayscale_normalized = grayscale_image / 255.0
+#     color_mapper = LinearColorMapper(palette="Greens256", low=1, high=0)
 
-    # Create a Bokeh figure
-    p = figure(
-        title="Grayscale Image with Colormap",
-        x_range=(0, grayscale_image.shape[1]),
-        y_range=(0, grayscale_image.shape[0]),
-        # width=500,
-        max_height=400,
-        # max_width=1200,
-        # width_policy="fit",
-        # height=500,
-        aspect_ratio="auto",
-        # sizing_mode="scale_both",
-        tools="pan, wheel_zoom, reset",
-    )
+#     # Create a Bokeh figure
+#     p = figure(
+#         title="Grayscale Image with Colormap",
+#         x_range=(0, grayscale_image.shape[1]),
+#         y_range=(0, grayscale_image.shape[0]),
+#         # width=500,
+#         max_height=400,
+#         # max_width=1200,
+#         # width_policy="fit",
+#         # height=500,
+#         aspect_ratio="auto",
+#         # sizing_mode="scale_both",
+#         tools="pan, wheel_zoom, reset",
+#     )
 
-    # Plot the image
-    p.image(
-        image=[grayscale_normalized],
-        x=0, y=0, 
-        dw=grayscale_image.shape[1],
-        dh=grayscale_image.shape[0],
-        # color_mapper=color_mapper,
-    )
+#     # Plot the image
+#     p.image(
+#         image=[grayscale_normalized],
+#         x=0, y=0, 
+#         dw=grayscale_image.shape[1],
+#         dh=grayscale_image.shape[0],
+#         # color_mapper=color_mapper,
+#     )
 
-    # Show the plot
-    output_notebook()  # Display in a notebook environment
-    show(p)  # Render the Bokeh plot
+#     # Show the plot
+#     output_notebook()  # Display in a notebook environment
+#     show(p)  # Render the Bokeh plot
 
 ```
 
 ```python
-image_data = image_data[:, :, :3]
-print(image_data.shape)
-print(image_data.dtype)
+# image_data = image_data[:, :, :3]
+# print(image_data.shape)
+# print(image_data.dtype)
 
 
-bokeh_colormap(image_data)
+# bokeh_colormap(image_data)
 
-# image_data = image_data[:, :, 1]
+# # image_data = image_data[:, :, 1]
 
-# morphological = VegetationIndex()
-# smoothed = morphological.apply(image_data)
-# print(smoothed.shape)
-# print(smoothed.dtype)
+# # morphological = VegetationIndex()
+# # smoothed = morphological.apply(image_data)
+# # print(smoothed.shape)
+# # print(smoothed.dtype)
 
-# smoothed = (smoothed * 255).astype(np.uint8)
+# # smoothed = (smoothed * 255).astype(np.uint8)
 
-# bokeh_colormap(smoothed)
-# image = Image.fromarray(smoothed)
+# # bokeh_colormap(smoothed)
+# # image = Image.fromarray(smoothed)
 
-# pn.pane.Image(image, height=300).show()
+# # pn.pane.Image(image, height=300).show()
 ```
 
+## First Two Stages
 
+```python
+pipeline.add_stage('Upload', StageUpload)
+pipeline.add_stage('Search', StageSearch)
+# pipeline.add_stage('Audit', StageAudit)
 
+pipeline.show()
+```
 
 ## Audit Targets
 - Manually deselect targets missed by the algorithm
@@ -1010,9 +1042,9 @@ Add our initialized stages to the pipeline.
 
 ```python
 
-pipeline.add_stage('Upload', StageUpload)
-pipeline.add_stage('Search', StageSearch)
-pipeline.add_stage('Audit', StageAudit)
+# pipeline.add_stage('Upload', StageUpload)
+# # pipeline.add_stage('Search', StageSearch)
+# # pipeline.add_stage('Audit', StageAudit)
 
 # pipeline.show()
 ```
