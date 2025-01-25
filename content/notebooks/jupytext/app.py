@@ -169,26 +169,122 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 # ## Get Targets from Binary Mask
 
 # +
+import geopandas as gpd
+import panel as pn
+from io import BytesIO
+
+class DownloadGeoJSON(param.Parameterized):
+    # Parameter to hold the GeoDataFrame
+    source_gdf = param.ClassSelector(class_=gpd.GeoDataFrame, default=None, allow_None=True)
+    filename = param.String(default="output.geojson")
+    button_type = param.String(default="primary")
+    name = param.String(default="Download")
+
+    def get_geojson_file(self):
+        """
+        Convert the current GeoDataFrame (source_gdf) to a GeoJSON string for download.
+        """
+        if self.source_gdf is None:
+            print("No GeoDataFrame is set!")
+            return BytesIO()  # Return an empty file
+        bio = BytesIO()
+        self.source_gdf.to_file(bio, driver="GeoJSON")
+        bio.seek(0)
+        return bio
+
+    @param.depends("source_gdf", "filename", "button_type", "name")
+    def download_widget(self):
+        """
+        Return a FileDownload widget based on the current state of the parameters.
+        """
+        return pn.widgets.FileDownload(
+            callback=lambda: self.get_geojson_file(),
+            filename=self.filename,
+            button_type=self.button_type,
+            name=self.name
+        )
+
+
+# +
+import geopandas as gpd
+
+from plant_search.image_preprocess import identify_targets
+from plant_search.load_image import load_image
+
+
 class AcquireTargetsWidget(param.Parameterized):
     binary_mask = param.Parameter(default=None, doc="2D np.array of binary mask")
-    targets_geojson = param.Parameter(default=None, doc="geoJSON of potential targets")
+    region_geotiff_path = param.Parameter(default=None, doc="Original orthophoto for georeference")
+    targets_gdf = param.Parameter(default=None, doc="GDF of potential targets")
 
     def __init__(self, **params):
         super().__init__(**params)
+        self.find_targets() # Auto-search on init
+
+
+    @param.depends("binary_mask", "region_geotiff_path", watch=True)
+    def find_targets(self):
+        if not self.region_geotiff_path:
+            return None
+        if self.binary_mask is None:
+            return None # Need binary mask to perform
+        
+        print("Generate GDF")
+        image, transform, bounds, crs = load_image(self.region_geotiff_path)
+        self.targets_gdf = identify_targets(self.binary_mask, transform)
+
+    def _downscale_for_display(self, image, max_width=1000, max_height=1000):
+        """Downscale an image for display purposes."""
+        if len(image.shape) == 3 and image.shape[2] == 4:  # RGBA
+            pil_image = Image.fromarray(image[:, :, :3])  # Strip alpha for display
+        elif len(image.shape) == 3:  # RGB
+            pil_image = Image.fromarray(image)
+        else:  # Grayscale
+            pil_image = Image.fromarray(image)
+
+        pil_image.thumbnail((max_width, max_height))  # Resize while maintaining aspect ratio
+        return pil_image
+
+
+    def view_output_targets(self):
+        output_panel = "Output here"
+        return output_panel
+
+    @param.depends("binary_mask", watch=False)
+    def view_binary_mask(self):
+        if self.binary_mask is not None:
+            input_mask = self._downscale_for_display(self.binary_mask)
+            return pn.Row(
+                "Input binary mask",
+                pn.pane.Image(input_mask, height=500, width=500)
+            )
+        else:
+            return "No binary mask image uploaded!"
 
     def view(self):
         targeting_panel = pn.Column(
-            "#Find Targets from Mask",
-
+            pn.Row("#Find Targets from Mask"),
+            self.view_binary_mask,
+            
         )
         return targeting_panel
 
+
+
 class StageAcquireTargets(param.Parameterized):
     binary_mask = param.Parameter(default=None, doc="2D np.array of binary mask")
+    region_geotiff_path = param.String(default=None, doc="Path to OG geotiff")
 
     def __init__(self, **params):
         super().__init__(**params)
         self._add_aquire_targets_widgets()
+
+        self.download_targets = DownloadGeoJSON(
+            source_gdf=self.acquire_targets.targets_gdf,
+            filename="targets.geojson",
+            button_type="primary",
+            name="Download Targets"
+        )
 
     @param.output(binary_mask=param.Parameter())
     def output(self):
@@ -196,42 +292,46 @@ class StageAcquireTargets(param.Parameterized):
     
     def _add_aquire_targets_widgets(self):
         self.acquire_targets = AcquireTargetsWidget(
-            binary_mask=self.binary_mask
+            binary_mask=self.binary_mask,
+            region_geotiff_path=self.region_geotiff_path
         )
 
     def panel(self):
-        return pn.Row(self.target_search.view())
+        return pn.Row(
+            self.acquire_targets.view(),
+            self.download_targets.download_widget)
 
 
 # +
 # from panel_app.search_stage import StageSearch
+import numpy as np
 
 # Run stage manually
 pn.extension()
 
+binary_mask_image = Image.open(binary_mask_filename)
+binary_mask_array = np.array(binary_mask_image)
+
 stage3 = StageAcquireTargets(
-    binary_mask=binary_mask_filename
+    binary_mask=binary_mask_array,
+    region_geotiff_path=region_image_path,
 )
 # stage3.panel() # In notebook
 stage3.panel().show() # In browser
 # stage3.param.outputs()
 # -
 
-# ## First Two Stages
+# ## First Three Stages
 
 # +
-from panel_app.upload_stage import StageUpload
-from panel_app.search_stage import StageSearch
+# from panel_app.upload_stage import StageUpload
+# from panel_app.search_stage import StageSearch
 
-pipeline.add_stage('Upload', StageUpload)
-pipeline.add_stage('Search', StageSearch)
-pipeline.add_stage('Acquire Targets', StageAcquireTargets)
-pipeline.show()
+# pipeline.add_stage('Upload', StageUpload)
+# pipeline.add_stage('Search', StageSearch)
+# pipeline.add_stage('Acquire Targets', StageAcquireTargets)
+# pipeline.show()
 # -
-
-print(pipeline._stages['Search'])
-# print(pipeline._stages['Upload'])
-print(pipeline.param.outputs())
 
 # ## Audit Targets
 # - Manually deselect targets missed by the algorithm
