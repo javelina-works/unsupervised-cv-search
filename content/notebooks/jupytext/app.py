@@ -43,6 +43,7 @@
 import param
 import panel as pn
 
+pn.extension()
 pipeline = pn.pipeline.Pipeline()
 # -
 
@@ -636,25 +637,25 @@ class StageSearch(param.Parameterized):
         super().__init__(**params)
         self._add_search_widgets()
 
-    @param.output()
+    @param.output(binary_mask=param.Parameter())
     def output(self):
-        return
+        return self.target_search.output_image
     
     def _add_search_widgets(self):
         veg_index = VegetationIndex()
         smoothing = Smoothing()
         contrast = ContrastEnhancement(enabled=False)
-        morphological = MorphologicalRefinement(enabled=False)
+        morphological = MorphologicalRefinement(enabled=True)
         thresholding = ManualThresholding()
         
         image_array = np.array(self.input_image) # Needs to be numpy array
-        self.search_widgets = TargetSearch(
+        self.target_search = TargetSearch(
             input_image=image_array,
             techniques=[veg_index, smoothing, contrast, morphological, thresholding]
         )
 
     def panel(self):
-        return pn.Row(self.search_widgets.view())
+        return pn.Row(self.target_search.view())
 
 
 # +
@@ -747,11 +748,9 @@ class StageSearch(param.Parameterized):
 # ## First Two Stages
 
 # +
-pipeline.add_stage('Upload', StageUpload)
-pipeline.add_stage('Search', StageSearch)
-# pipeline.add_stage('Audit', StageAudit)
-
-pipeline.show()
+# pipeline.add_stage('Upload', StageUpload)
+# pipeline.add_stage('Search', StageSearch)
+# pipeline.show()
 # -
 
 # ## Audit Targets
@@ -1046,11 +1045,11 @@ audit_stage = StageAudit(
 
 # +
 
-# pipeline.add_stage('Upload', StageUpload)
-# # pipeline.add_stage('Search', StageSearch)
-# # pipeline.add_stage('Audit', StageAudit)
+pipeline.add_stage('Upload', StageUpload)
+pipeline.add_stage('Search', StageSearch)
+pipeline.add_stage('Audit', StageAudit)
 
-# pipeline.show()
+pipeline.show()
 
 # + vscode={"languageId": "raw"} active=""
 # import param
