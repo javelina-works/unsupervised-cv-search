@@ -109,7 +109,10 @@ class StageAcquireTargets(param.Parameterized):
         region_geojson=param.Parameter
     )
     def output(self):
-        return self.acquire_targets.targets_gdf, self.region_geojson
+        return (
+            self.acquire_targets.targets_gdf,
+            self.region_geojson
+        )
     
     def _add_aquire_targets_widgets(self):
         self.acquire_targets = AcquireTargetsWidget(
@@ -118,21 +121,29 @@ class StageAcquireTargets(param.Parameterized):
         )
 
     def panel(self):
+        if self.acquire_targets.targets_gdf is not None:
+            targets_pane = f"Total targets found: {len(self.acquire_targets.targets_gdf)}"
+        else:
+            targets_pane = pn.pane.Markdown("No targets yet found!")
+
         targets_row = pn.Row(
-            self.acquire_targets.view(),
+            self.acquire_targets.view,
             self.download_targets.download_widget,
-            pn.pane.JSON(self.region_geojson, depth=2, name="Uploaded GeoJSON")
+            targets_pane
         )
         return pn.panel(targets_row)
 
 
 
 class StageAudit(param.Parameterized):
-    input_image_transform=param.Parameter(doc="Transform to map image np.ndarray to geospatial reference")
-    region_geojson = param.Dict(allow_None=False, doc="Open GeoJSON file defining the work region outline")
+    # input_image_transform=param.Parameter(doc="Transform to map image np.ndarray to geospatial reference")
     targets_gdf = param.Parameter(default=None, doc="GeoPandas DF of potential targets")
+    region_geojson = param.Dict(allow_None=False, doc="Open GeoJSON file defining the work region outline")
 
-    @param.output() # TBD best param type for geoJSON/GDFs
+    @param.output(
+            targets_gdf=param.Parameter,
+            removed_targets_gdf=param.Parameter,
+    ) # TBD best param type for geoJSON/GDFs
     def output(self):
         return self.map_view.targets_gdf, self.map_view.removed_targets_gdf
 

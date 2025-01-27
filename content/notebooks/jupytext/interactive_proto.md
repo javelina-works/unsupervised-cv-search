@@ -196,7 +196,11 @@ print(f"Number of targets (detected plants): {len(targets_gdf)}")
 <!-- #endraw -->
 
 ```python
-from plant_search.image_preprocess import correct_binary_mask, identify_targets
+from plant_search.image_preprocess import (
+    correct_binary_mask, 
+    identify_targets, 
+    assign_target_metadata
+)
 from plant_search.load_image import load_image
 import rasterio
 
@@ -207,36 +211,8 @@ with rasterio.open(binary_mask_path) as src:
     binary_mask = src.read(1)  # Read the first band
     
 full_binary_mask = correct_binary_mask(binary_mask, image.shape)
-targets_gdf = identify_targets(full_binary_mask, transform)
-```
-
-```python
-import geopandas as gpd
-import uuid
-
-def assign_target_metadata(targets_gdf, region_name, region_version):
-    """
-    Assigns a globally unique ID to each target in `targets_gdf` and associates an outline version.
-
-    Parameters:
-    - targets_gdf (GeoDataFrame): The GeoDataFrame containing target points.
-    - region_name (str): Name of region for which we have an outline.
-    - region_version (str): The outline version to associate with each target.
-
-    Returns:
-    - GeoDataFrame: Updated `targets_gdf` with unique IDs and version.
-    """
-    # Assign a globally unique ID to each target
-    targets_gdf["target_id"] = [str(uuid.uuid4()) for _ in range(len(targets_gdf))]
-
-    # Associate each target with the given outline version
-    targets_gdf["region_outline_version"] = region_version
-    targets_gdf["region_name"] = region_name
-
-
-    return targets_gdf
-
-targets_gdf = assign_target_metadata(targets_gdf, region_name, region_version)
+only_targets_gdf = identify_targets(full_binary_mask, transform)
+targets_gdf = assign_target_metadata(only_targets_gdf, region_name, region_version)
 ```
 
 ### 3. Find Efficient Depot Locations

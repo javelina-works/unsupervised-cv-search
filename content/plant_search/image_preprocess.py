@@ -102,3 +102,27 @@ def identify_targets(binary_mask, transform, region_crs="EPSG:32613"):
     targets_gdf = gpd.GeoDataFrame(features, crs=region_crs)
 
     return targets_gdf
+
+
+import uuid
+
+def assign_target_metadata(targets_gdf, region_name, region_version):
+    """
+    Assigns a globally unique ID to each target in `targets_gdf` and associates an outline version.
+
+    Parameters:
+    - targets_gdf (GeoDataFrame): The GeoDataFrame containing target points.
+    - region_name (str): Name of region for which we have an outline.
+    - region_version (str): The outline version to associate with each target.
+
+    Returns:
+    - GeoDataFrame: Updated `targets_gdf` with unique IDs and version.
+    """
+    # Assign a globally unique ID to each target
+    targets_gdf["target_id"] = [str(uuid.uuid4()) for _ in range(len(targets_gdf))]
+
+    # Associate each target with the given outline version
+    targets_gdf["region_outline_version"] = region_version
+    targets_gdf["region_name"] = region_name
+
+    return targets_gdf

@@ -2,12 +2,14 @@ import geopandas as gpd
 import param
 import panel as pn
 from PIL import Image
-from plant_search.image_preprocess import identify_targets
+from plant_search.image_preprocess import identify_targets, assign_target_metadata
 from plant_search.load_image import load_image
 
 class AcquireTargetsWidget(param.Parameterized):
-    binary_mask = param.Parameter(default=None, doc="2D np.array of binary mask")
+    binary_mask = param.Parameter(allow_None=False, doc="2D np.array of binary mask")
     input_image_transform=param.Parameter(allow_None=False, doc="Transform to map image np.ndarray to geospatial reference")
+    region_name = param.String(default="Region Outline", doc="Name of region for which we have an outline")
+    region_version = param.String(default="Region version", doc="The outline version to associate with each target")
     targets_gdf = param.Parameter(default=None, doc="GDF of potential targets")
 
 
@@ -24,9 +26,10 @@ class AcquireTargetsWidget(param.Parameterized):
     @param.depends("binary_mask", watch=True)
     def find_targets(self):
         if self.binary_mask is None:
+            print("Binary mask is None!")
             return None # Need binary mask to perform
-        
-        self.targets_gdf = identify_targets(self.binary_mask, self.input_image_transform)
+        only_targets_gdf = identify_targets(self.binary_mask, self.input_image_transform)
+        self.targets_gdf = assign_target_metadata(only_targets_gdf, self.region_name, self.region_version)
 
     def _downscale_for_display(self, image, max_width=1000, max_height=1000):
         """Downscale an image for display purposes."""

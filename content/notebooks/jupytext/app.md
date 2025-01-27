@@ -189,35 +189,59 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 ```python
 # from PIL import Image
 # import numpy as np
+# import json
+# import rasterio
 # from panel_app.pipeline import StageAcquireTargets
 
 
 # # Run stage manually
 # pn.extension()
 
+# # image = Image.open(region_image_path) # Pass as PIL image
+# with rasterio.open(region_image_path) as src:
+#     region_image = {
+#         "data": src.read().transpose(1, 2, 0), # Convert (bands, h, w) to (h, w, bands)
+#         "crs": src.crs,      # Coordinate Reference System
+#         "transform": src.transform  # Affine transform
+#     }
+
 # binary_mask_image = Image.open(binary_mask_filename)
 # binary_mask_array = np.array(binary_mask_image)
 
+# with open(region_contour_geojson, "r") as f:
+#     region_outline_data = json.load(f)
+
+
+
 # stage3 = StageAcquireTargets(
+#     input_image = region_image["data"],
+#     input_image_transform = region_image["transform"],
 #     binary_mask=binary_mask_array,
-#     region_geotiff_path=region_image_path,
+#     region_geojson=region_outline_data
 # )
 # # stage3.panel() # In notebook
 # stage3.panel().show() # In browser
 # # stage3.param.outputs()
 ```
 
+```python
+# print(len(stage3.output()))
+# targets_gdf, region_geojson = stage3.output()
+# targets_gdf
+
+```
+
 ## First Three Stages
 
 ```python
-from panel_app.pipeline import (
-    StageUpload, StageSearch, StageAcquireTargets
-)
+# from panel_app.pipeline import (
+#     StageUpload, StageSearch, StageAcquireTargets
+# )
 
-pipeline.add_stage('Upload', StageUpload)
-pipeline.add_stage('Search', StageSearch)
-pipeline.add_stage('Acquire Targets', StageAcquireTargets)
-pipeline.show()
+# pipeline.add_stage('Upload', StageUpload)
+# pipeline.add_stage('Search', StageSearch)
+# pipeline.add_stage('Acquire Targets', StageAcquireTargets)
+# pipeline.show()
 ```
 
 ## Audit Targets
@@ -251,16 +275,18 @@ pipeline.show()
 Add our initialized stages to the pipeline.
 
 ```python
-# from panel_app.pipeline import (
-#     StageUpload, StageSearch, StageAcquireTargets, StageAudit
-# )
+from panel_app.pipeline import (
+    StageUpload, StageSearch, StageAcquireTargets, StageAudit
+)
 
-# pipeline.add_stage('Upload', StageUpload)
-# pipeline.add_stage('Search', StageSearch)
-# pipeline.add_stage('Targeting', StageAcquireTargets)
-# pipeline.add_stage('Audit', StageAudit)
+pn.extension('ipywidgets')
 
-# pipeline.show()
+pipeline.add_stage('Upload', StageUpload)
+pipeline.add_stage('Search', StageSearch)
+pipeline.add_stage('Targeting', StageAcquireTargets)
+pipeline.add_stage('Audit', StageAudit)
+
+pipeline.show()
 ```
 
 <!-- #raw vscode={"languageId": "raw"} -->
