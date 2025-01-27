@@ -7,24 +7,26 @@ from plant_search.load_image import load_image
 
 class AcquireTargetsWidget(param.Parameterized):
     binary_mask = param.Parameter(default=None, doc="2D np.array of binary mask")
-    region_geotiff_path = param.Parameter(default=None, doc="Original orthophoto for georeference")
+    input_image_transform=param.Parameter(allow_None=False, doc="Transform to map image np.ndarray to geospatial reference")
     targets_gdf = param.Parameter(default=None, doc="GDF of potential targets")
+
 
     def __init__(self, **params):
         super().__init__(**params)
         self.find_targets() # Auto-search on init
 
+        self._get_targets_button_widget = pn.widgets.Button(name="Find targets from binary mask", button_type="primary")
+        self._get_targets_button_widget.on_click(self._handle_targets_button_click)
 
-    @param.depends("binary_mask", "region_geotiff_path", watch=True)
+    def _handle_targets_button_click(self, event=None):
+        self.find_targets()
+
+    @param.depends("binary_mask", watch=True)
     def find_targets(self):
-        if not self.region_geotiff_path:
-            return None
         if self.binary_mask is None:
             return None # Need binary mask to perform
         
-        print("Generate GDF")
-        image, transform, bounds, crs = load_image(self.region_geotiff_path)
-        self.targets_gdf = identify_targets(self.binary_mask, transform)
+        self.targets_gdf = identify_targets(self.binary_mask, self.input_image_transform)
 
     def _downscale_for_display(self, image, max_width=1000, max_height=1000):
         """Downscale an image for display purposes."""
@@ -56,9 +58,9 @@ class AcquireTargetsWidget(param.Parameterized):
 
     def view(self):
         targeting_panel = pn.Column(
-            pn.Row("#Find Targets from Mask"),
+            pn.Row("# Find Targets from Mask"),
+            self._get_targets_button_widget,
             self.view_binary_mask,
-            
         )
         return targeting_panel
 

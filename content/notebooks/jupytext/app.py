@@ -88,15 +88,29 @@ depots_filename = '../input/interactive_proto/depot_points.geojson'
 # +
 # from panel_app.pipeline import StageSearch
 # from PIL import Image
+# import rasterio
+# import json
 
 # # Run stage manually
 # pn.extension()
 
-# image_path = region_image_path
-# image = Image.open(image_path) # Pass as PIL image
+
+# # image = Image.open(region_image_path) # Pass as PIL image
+# with rasterio.open(region_image_path) as src:
+#     region_image = {
+#         "data": src.read().transpose(1, 2, 0), # Convert (bands, h, w) to (h, w, bands)
+#         "crs": src.crs,      # Coordinate Reference System
+#         "transform": src.transform  # Affine transform
+#     }
+
+# with open(region_contour_geojson, "r") as f:
+#     region_outline_data = json.load(f)
+
 
 # stage2 = StageSearch(
-#     input_image = image
+#     input_image = region_image["data"],
+#     input_image_transform = region_image["transform"],
+#     region_geojson = region_outline_data
 # )
 # # stage2.panel() # In notebook
 # stage2.panel().show() # In browser

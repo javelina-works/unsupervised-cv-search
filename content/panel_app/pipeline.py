@@ -1,5 +1,6 @@
 import param
 import panel as pn
+import copy
 
 from panel_app.upload_stage import UploadRegionFiles
 from panel_app.search_stage import *
@@ -17,24 +18,36 @@ class StageUpload(param.Parameterized):
         self._add_upload_widgets()
 
     @param.output(
-        input_image=param.Parameter, 
+        input_image=param.Parameter,
+        input_image_transform=param.Parameter,
         region_geojson=param.Parameter
     )
     def output(self):
-        region_orthophoto = self.upload_widgets.get_region_image()
+        region_orthophoto = self.upload_widgets.get_region_geotiff()
+        region_image = np.copy(region_orthophoto['data']) # Numpy array image (h,w,bands)
+        
+        region_image_transform = region_orthophoto['transform'] # Transform to be computed
+        input_image_transform_copy = copy.deepcopy(region_image_transform)
+        # region_image = self.upload_widgets.get_region_image()
+
         region_geojson = self.upload_widgets.get_region_geojson()
-        return region_orthophoto, region_geojson
-    
+        return (
+            region_image,
+            input_image_transform_copy, 
+            region_geojson
+        )
     def _add_upload_widgets(self):
         self.upload_widgets = UploadRegionFiles()
 
     def panel(self):
-        return pn.Row(self.upload_widgets.view())
+        upload_row = pn.Row(self.upload_widgets.view)
+        return upload_row
     
 
 
 class StageSearch(param.Parameterized):
-    input_image = param.Parameter(default=None, doc="Image to search for targets")
+    input_image = param.Parameter(allow_None=False, doc="Original region orthophoto")
+    input_image_transform=param.Parameter(allow_None=False, doc="Transform to map image np.ndarray to geospatial reference")
     region_geojson = param.Parameter(default=None, doc="Uploaded geoJSON of work region outline")
 
     def __init__(self, **params):
@@ -43,20 +56,23 @@ class StageSearch(param.Parameterized):
             self.image_array = np.array(self.input_image) # Needs to be numpy array
         else:
             self.image_array = None # Don't pass empty array
+            raise ValueError("input_image cannot be None in StageSearch initialization")
         self._add_search_widgets()
 
     @param.output(
+        input_image=param.Parameter,
+        input_image_transform=param.Parameter,
         binary_mask=param.Parameter,
         region_geojson=param.Parameter
     )
     def output(self):
-        return self.target_search.output_image, self.region_geojson
+        return self.input_image, self.input_image_transform, self.target_search.output_image, self.region_geojson
     
     def _add_search_widgets(self):
         veg_index = VegetationIndex()
         smoothing = Smoothing()
         contrast = ContrastEnhancement(enabled=False)
-        morphological = MorphologicalRefinement(enabled=True)
+        morphological = MorphologicalRefinement(enabled=False)
         thresholding = ManualThresholding()
         
         self.target_search = TargetSearch(
@@ -65,13 +81,15 @@ class StageSearch(param.Parameterized):
         )
 
     def panel(self):
-        return pn.Row(self.target_search.view())
+        search_row = pn.Row(self.target_search.view)
+        return search_row
     
 
 
 class StageAcquireTargets(param.Parameterized):
+    input_image = param.Parameter(allow_None=False, doc="Original region orthophoto")
+    input_image_transform=param.Parameter(allow_None=False, doc="Transform to map image np.ndarray to geospatial reference")
     binary_mask = param.Parameter(default=None, doc="2D np.array of binary mask")
-    region_geotiff_path = param.String(default=None, doc="Path to OG geotiff")
     region_geojson = param.Parameter(default=None, doc="Uploaded geoJSON of work region outline")
 
 
@@ -96,19 +114,21 @@ class StageAcquireTargets(param.Parameterized):
     def _add_aquire_targets_widgets(self):
         self.acquire_targets = AcquireTargetsWidget(
             binary_mask=self.binary_mask,
-            region_geotiff_path=self.region_geotiff_path
+            input_image_transform=self.input_image_transform
         )
 
     def panel(self):
-        return pn.Row(
+        targets_row = pn.Row(
             self.acquire_targets.view(),
             self.download_targets.download_widget,
             pn.pane.JSON(self.region_geojson, depth=2, name="Uploaded GeoJSON")
         )
+        return pn.panel(targets_row)
 
 
 
 class StageAudit(param.Parameterized):
+    input_image_transform=param.Parameter(doc="Transform to map image np.ndarray to geospatial reference")
     region_geojson = param.Dict(allow_None=False, doc="Open GeoJSON file defining the work region outline")
     targets_gdf = param.Parameter(default=None, doc="GeoPandas DF of potential targets")
 
