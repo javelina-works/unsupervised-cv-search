@@ -124,25 +124,6 @@ class UploadRegionFiles(param.Parameterized):
             ),
         )
 
-
-class StageUpload(param.Parameterized):
-    
-    def __init__(self, **params):
-        super().__init__(**params)
-        self._add_upload_widgets()
-
-    @param.output(input_image=param.Parameter, region_geojson=param.Parameter)
-    def output(self):
-        region_orthophoto = self.upload_widgets.get_region_image()
-        region_geojson = self.upload_widgets.get_region_geojson()
-        return region_orthophoto, region_geojson
-    
-    def _add_upload_widgets(self):
-        self.upload_widgets = UploadRegionFiles()
-
-    def panel(self):
-        return pn.Row(self.upload_widgets.view())
-
 # # Run the app
 # target_audit_app = UploadRegionFiles()
 # target_audit_app.view().servable()

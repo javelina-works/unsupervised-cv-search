@@ -4,9 +4,6 @@ import numpy as np
 from PIL import Image
 
 
-from panel_app.search_techniques import (
-    VegetationIndex, Smoothing, ContrastEnhancement, MorphologicalRefinement, ManualThresholding
-)
 
 class TargetSearch(param.Parameterized):
     input_image = param.Parameter(default=None, doc="Input orthophoto to search")
@@ -163,37 +160,3 @@ class TargetSearch(param.Parameterized):
             self.view_images,
         )
         return target_panel
-    
-
-
-class StageSearch(param.Parameterized):
-    input_image = param.Parameter(default=None, doc="Image to search for targets")
-
-    def __init__(self, **params):
-        super().__init__(**params)
-
-        if self.input_image is not None:
-            self.image_array = np.array(self.input_image) # Needs to be numpy array
-        else:
-            self.image_array = None # Don't pass empty array
-
-        self._add_search_widgets()
-
-    @param.output(binary_mask=param.Parameter())
-    def output(self):
-        return self.target_search.output_image
-    
-    def _add_search_widgets(self):
-        veg_index = VegetationIndex()
-        smoothing = Smoothing()
-        contrast = ContrastEnhancement(enabled=False)
-        morphological = MorphologicalRefinement(enabled=True)
-        thresholding = ManualThresholding()
-        
-        self.target_search = TargetSearch(
-            input_image=self.image_array,
-            techniques=[veg_index, smoothing, contrast, morphological, thresholding]
-        )
-
-    def panel(self):
-        return pn.Row(self.target_search.view())
